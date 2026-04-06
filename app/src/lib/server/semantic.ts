@@ -38,6 +38,9 @@ interface ReindexSummary {
 	imageContentEmbeddingsUsed: number;
 }
 
+const DEFAULT_REINDEX_CONCURRENCY = 1;
+const MAX_REINDEX_CONCURRENCY = 8;
+
 function normalizeVector(vector: number[]): number[] {
 	let norm = 0;
 	for (const value of vector) norm += value * value;
@@ -75,6 +78,18 @@ function embeddingProvider(): EmbeddingProvider {
 	if (provider === 'openai') return 'openai';
 	if (provider === 'multimodal' || provider === 'qwen-vl') return 'multimodal';
 	return 'ollama';
+}
+
+function resolveReindexConcurrency(concurrency?: number): number {
+	const candidate = typeof concurrency === 'number' && Number.isFinite(concurrency)
+		? concurrency
+		: Number.parseInt(env.EMBEDDING_REINDEX_CONCURRENCY ?? String(DEFAULT_REINDEX_CONCURRENCY), 10);
+
+	if (!Number.isFinite(candidate) || candidate < 1) {
+		return DEFAULT_REINDEX_CONCURRENCY;
+	}
+
+	return Math.min(Math.floor(candidate), MAX_REINDEX_CONCURRENCY);
 }
 
 async function embedWithMultimodal(input: {
@@ -295,6 +310,10 @@ async function deletePoints(ids: string[]): Promise<void> {
 	});
 }
 
+export async function deleteSemanticEntryByRelativePath(relativePath: string): Promise<void> {
+	await deletePoints([createPointId(relativePath)]);
+}
+
 async function toMediaFileEntry(relativePath: string): Promise<MediaEntry | null> {
 	const resolved = resolveSafePath(relativePath);
 	if (!resolved) return null;
@@ -409,8 +428,9 @@ async function makePoint(entry: MediaEntry): Promise<{ point: QdrantPoint; usedI
 	return { point, usedImageEmbedding };
 }
 
-export async function reindexSemanticCollection(): Promise<ReindexSummary> {
+export async function reindexSemanticCollection(options?: { concurrency?: number }): Promise<ReindexSummary> {
 	const files = await collectAllFiles();
+	const concurrency = resolveReindexConcurrency(options?.concurrency);
 	if (files.length === 0) {
 		return {
 			totalFiles: 0,
@@ -430,26 +450,38 @@ export async function reindexSemanticCollection(): Promise<ReindexSummary> {
 	let buffer: QdrantPoint[] = [];
 	let ensured = false;
 
-	for (const file of files) {
-		try {
-			const { point, usedImageEmbedding } = await makePoint(file);
+	for (let i = 0; i < files.length; i += concurrency) {
+		const batch = files.slice(i, i + concurrency);
+		const results = await Promise.allSettled(
+			batch.map(async (file) => {
+				const result = await makePoint(file);
+				return { file, ...result };
+			})
+		);
+
+		for (const [index, result] of results.entries()) {
+			const file = batch[index];
+			if (result.status === 'rejected') {
+				skipped++;
+				console.warn('Failed to index file:', file.path, result.reason);
+				continue;
+			}
+
+			const { point, usedImageEmbedding } = result.value;
 			if (!ensured) {
-				await ensureCollection(point.vector.length);
 				ensured = true;
+				await ensureCollection(point.vector.length);
 			}
 
 			buffer.push(point);
 			newIds.add(point.id);
 			indexed++;
 			if (usedImageEmbedding) imageContentEmbeddingsUsed++;
+		}
 
-			if (buffer.length >= 64) {
-				await upsertPoints(buffer);
-				buffer = [];
-			}
-		} catch (err) {
-			skipped++;
-			console.warn('Failed to index file:', file.path, err);
+		if (buffer.length >= 64) {
+			await upsertPoints(buffer);
+			buffer = [];
 		}
 	}
 

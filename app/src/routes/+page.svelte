@@ -19,6 +19,7 @@
 	import { Separator } from '$lib/components/ui/separator';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import * as Breadcrumb from '$lib/components/ui/breadcrumb/index.js';
+	import * as ContextMenu from '$lib/components/ui/context-menu/index.js';
 	import MediaIcon from '$lib/components/media-icon.svelte';
 	import { page } from '$app/stores';
 	type MediaType = 'video' | 'audio' | 'image' | 'document' | 'other';
@@ -68,6 +69,8 @@
 	let semanticError = $state<string | null>(null);
 	let reindexing = $state(false);
 	let reindexMessage = $state<string | null>(null);
+	let reindexConcurrency = $state(1);
+	let deletingPath = $state<string | null>(null);
 
 	let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 	let searchAbortController: AbortController | null = null;
@@ -195,11 +198,52 @@
 		if (isSemanticMode) queueSemanticSearch();
 	}
 
+	function canDeleteEntry(entry: Entry) {
+		return entry.type === 'file' && entry.mediaType === 'image';
+	}
+
+	async function deleteEntry(entry: Entry) {
+		if (!canDeleteEntry(entry) || deletingPath) return;
+
+		const confirmed = window.confirm(`Delete "${entry.name}"? This cannot be undone.`);
+		if (!confirmed) return;
+
+		deletingPath = entry.path;
+		try {
+			const res = await fetch(`/api/delete/${encodeURI(entry.path)}`, { method: 'DELETE' });
+			if (!res.ok) throw new Error(await res.text());
+
+			if (isSemanticMode) {
+				await runSemanticSearch();
+			} else {
+				await browse(currentPath);
+			}
+		} catch (e) {
+			if (isSemanticMode) {
+				semanticError = e instanceof Error ? e.message : 'Delete failed';
+			} else {
+				error = e instanceof Error ? e.message : 'Delete failed';
+			}
+		} finally {
+			deletingPath = null;
+		}
+	}
+
+	function clampConcurrency(value: number): number {
+		if (!Number.isFinite(value) || value < 1) return 1;
+		return Math.min(Math.floor(value), 8);
+	}
+
 	async function reindexSemantic() {
 		reindexing = true;
 		reindexMessage = null;
 		try {
-			const res = await fetch('/api/search/reindex', { method: 'POST' });
+			const concurrency = clampConcurrency(reindexConcurrency);
+			const res = await fetch('/api/search/reindex', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ concurrency })
+			});
 			if (!res.ok) throw new Error(await res.text());
 			const body = (await res.json()) as {
 				summary?: { indexed?: number; deleted?: number; skipped?: number };
@@ -384,6 +428,18 @@
 				</div>
 
 				<div class="flex gap-2">
+					<div class="flex items-center gap-2 rounded-md border border-border bg-background px-2">
+						<span class="text-xs text-muted-foreground">Parallel</span>
+						<input
+							type="number"
+							min="1"
+							max="8"
+							bind:value={reindexConcurrency}
+							class="h-9 w-16 border-0 bg-transparent text-sm outline-none"
+							aria-label="Parallel embeddings"
+						/>
+					</div>
+
 					<select
 						bind:value={semanticMediaType}
 						onchange={handleSemanticFilterChange}
@@ -479,39 +535,55 @@
 		{:else if viewMode === 'grid'}
 			<div class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
 				{#each displayEntries as entry (entry.path)}
-					<button
-						onclick={() => openEntry(entry)}
-						class="group flex flex-col items-center gap-2 rounded-xl border border-border bg-card p-4 text-center transition-all duration-150 hover:border-primary/50 hover:bg-accent"
-					>
-						{#if entry.type === 'file' && entry.mediaType === 'image'}
-							<div
-								class="h-10 w-10 shrink-0 overflow-hidden rounded border border-border transition-transform duration-150 group-hover:scale-110"
-							>
-								<img
-									src="/api/stream/{entry.path}"
-									alt={entry.name}
-									class="h-full w-full object-cover"
-									loading="lazy"
-								/>
-							</div>
-						{:else}
-							<MediaIcon
-								entryType={entry.type}
-								mediaType={entry.mediaType}
-								class="h-10 w-10 transition-transform duration-150 group-hover:scale-110
+					<ContextMenu.Root>
+						<ContextMenu.Trigger>
+							{#snippet child({ props })}
+								<button
+									{...props}
+									onclick={() => openEntry(entry)}
+									class="group flex flex-col items-center gap-2 rounded-xl border border-border bg-card p-4 text-center transition-all duration-150 hover:border-primary/50 hover:bg-accent"
+								>
+									{#if entry.type === 'file' && entry.mediaType === 'image'}
+										<div
+											class="h-10 w-10 shrink-0 overflow-hidden rounded border border-border transition-transform duration-150 group-hover:scale-110"
+										>
+											<img
+												src="/api/stream/{entry.path}"
+												alt={entry.name}
+												class="h-full w-full object-cover"
+												loading="lazy"
+											/>
+										</div>
+									{:else}
+										<MediaIcon
+											entryType={entry.type}
+											mediaType={entry.mediaType}
+											class="h-10 w-10 transition-transform duration-150 group-hover:scale-110
         {entry.type === 'directory' ? 'text-amber-400' : ''}
         {entry.mediaType === 'video' ? 'text-blue-400' : ''}
         {entry.mediaType === 'audio' ? 'text-purple-400' : ''}
         {entry.mediaType === 'image' ? 'text-green-400' : ''}
         {entry.mediaType === 'document' ? 'text-red-400' : ''}
         {entry.mediaType === 'other' ? 'text-muted-foreground' : ''}"
-							/>
-						{/if}
-						<span class="w-full truncate text-xs font-medium text-foreground">{entry.name}</span>
-						<Badge variant={getBadgeVariant(entry)} class="text-[10px]">
-							{getBadgeLabel(entry)}
-						</Badge>
-					</button>
+										/>
+									{/if}
+									<span class="w-full truncate text-xs font-medium text-foreground">{entry.name}</span>
+									<Badge variant={getBadgeVariant(entry)} class="text-[10px]">
+										{getBadgeLabel(entry)}
+									</Badge>
+								</button>
+							{/snippet}
+						</ContextMenu.Trigger>
+						<ContextMenu.Content class="w-48">
+							<ContextMenu.Item onSelect={() => openEntry(entry)}>Open</ContextMenu.Item>
+							{#if canDeleteEntry(entry)}
+								<ContextMenu.Separator />
+								<ContextMenu.Item variant="destructive" onSelect={() => deleteEntry(entry)}>
+									Delete picture
+								</ContextMenu.Item>
+							{/if}
+						</ContextMenu.Content>
+					</ContextMenu.Root>
 				{/each}
 			</div>
 
@@ -538,48 +610,64 @@
 					</thead>
 					<tbody>
 						{#each displayEntries as entry, i (entry.path)}
-							<tr
-								onclick={() => openEntry(entry)}
-								class="cursor-pointer border-border transition-colors hover:bg-muted/50
-									{i !== displayEntries.length - 1 ? 'border-b' : ''}"
-							>
-								<td class="flex items-center gap-3 px-4 py-3">
-									{#if entry.type === 'file' && entry.mediaType === 'image'}
-										<div class="h-8 w-8 shrink-0 overflow-hidden rounded border border-border">
-											<img
-												src="/api/stream/{entry.path}"
-												alt={entry.name}
-												class="h-full w-full object-cover"
-												loading="lazy"
-											/>
-										</div>
-									{:else}
-										<MediaIcon
-											entryType={entry.type}
-											mediaType={entry.mediaType}
-											class="h-4 w-4 shrink-0
+							<ContextMenu.Root>
+								<ContextMenu.Trigger>
+									{#snippet child({ props })}
+										<tr
+											{...props}
+											onclick={() => openEntry(entry)}
+											class="cursor-pointer border-border transition-colors hover:bg-muted/50
+												{i !== displayEntries.length - 1 ? 'border-b' : ''}"
+										>
+											<td class="flex items-center gap-3 px-4 py-3">
+												{#if entry.type === 'file' && entry.mediaType === 'image'}
+													<div class="h-8 w-8 shrink-0 overflow-hidden rounded border border-border">
+														<img
+															src="/api/stream/{entry.path}"
+															alt={entry.name}
+															class="h-full w-full object-cover"
+															loading="lazy"
+														/>
+													</div>
+												{:else}
+													<MediaIcon
+														entryType={entry.type}
+														mediaType={entry.mediaType}
+														class="h-4 w-4 shrink-0
         {entry.type === 'directory' ? 'text-amber-400' : ''}
         {entry.mediaType === 'video' ? 'text-blue-400' : ''}
         {entry.mediaType === 'audio' ? 'text-purple-400' : ''}
         {entry.mediaType === 'image' ? 'text-green-400' : ''}
         {entry.mediaType === 'document' ? 'text-red-400' : ''}
         {entry.mediaType === 'other' ? 'text-muted-foreground' : ''}"
-										/>
+												/>
+												{/if}
+												<span class="truncate font-medium text-foreground">{entry.name}</span>
+											</td>
+											<td class="hidden px-4 py-3 sm:table-cell">
+												<Badge variant={getBadgeVariant(entry)} class="text-[10px]">
+													{getBadgeLabel(entry)}
+												</Badge>
+											</td>
+											<td class="hidden px-4 py-3 text-right text-muted-foreground md:table-cell">
+												{entry.size ? formatSize(entry.size) : '—'}
+											</td>
+											<td class="hidden px-4 py-3 text-right text-muted-foreground lg:table-cell">
+												{entry.modified ? formatDate(entry.modified) : '—'}
+											</td>
+										</tr>
+									{/snippet}
+								</ContextMenu.Trigger>
+								<ContextMenu.Content class="w-48">
+									<ContextMenu.Item onSelect={() => openEntry(entry)}>Open</ContextMenu.Item>
+									{#if canDeleteEntry(entry)}
+										<ContextMenu.Separator />
+										<ContextMenu.Item variant="destructive" onSelect={() => deleteEntry(entry)}>
+											Delete picture
+										</ContextMenu.Item>
 									{/if}
-									<span class="truncate font-medium text-foreground">{entry.name}</span>
-								</td>
-								<td class="hidden px-4 py-3 sm:table-cell">
-									<Badge variant={getBadgeVariant(entry)} class="text-[10px]">
-										{getBadgeLabel(entry)}
-									</Badge>
-								</td>
-								<td class="hidden px-4 py-3 text-right text-muted-foreground md:table-cell">
-									{entry.size ? formatSize(entry.size) : '—'}
-								</td>
-								<td class="hidden px-4 py-3 text-right text-muted-foreground lg:table-cell">
-									{entry.modified ? formatDate(entry.modified) : '—'}
-								</td>
-							</tr>
+								</ContextMenu.Content>
+							</ContextMenu.Root>
 						{/each}
 					</tbody>
 				</table>
