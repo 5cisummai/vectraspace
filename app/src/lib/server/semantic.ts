@@ -80,10 +80,8 @@ function embeddingProvider(): EmbeddingProvider {
 	return 'ollama';
 }
 
-function resolveReindexConcurrency(concurrency?: number): number {
-	const candidate = typeof concurrency === 'number' && Number.isFinite(concurrency)
-		? concurrency
-		: Number.parseInt(env.EMBEDDING_REINDEX_CONCURRENCY ?? String(DEFAULT_REINDEX_CONCURRENCY), 10);
+function resolveReindexConcurrency(): number {
+	const candidate = Number.parseInt(env.EMBEDDING_REINDEX_CONCURRENCY ?? String(DEFAULT_REINDEX_CONCURRENCY), 10);
 
 	if (!Number.isFinite(candidate) || candidate < 1) {
 		return DEFAULT_REINDEX_CONCURRENCY;
@@ -428,9 +426,9 @@ async function makePoint(entry: MediaEntry): Promise<{ point: QdrantPoint; usedI
 	return { point, usedImageEmbedding };
 }
 
-export async function reindexSemanticCollection(options?: { concurrency?: number }): Promise<ReindexSummary> {
+export async function reindexSemanticCollection(): Promise<ReindexSummary> {
 	const files = await collectAllFiles();
-	const concurrency = resolveReindexConcurrency(options?.concurrency);
+	const concurrency = resolveReindexConcurrency();
 	if (files.length === 0) {
 		return {
 			totalFiles: 0,
@@ -511,9 +509,13 @@ export async function indexFileByRelativePath(relativePath: string): Promise<boo
 	return true;
 }
 
-export async function semanticSearch(query: string, options?: { mediaType?: MediaType; rootIndex?: number; limit?: number }): Promise<SearchResult[]> {
+export async function semanticSearch(query: string, options?: { mediaType?: MediaType; rootIndex?: number; limit?: number; minScore?: number }): Promise<SearchResult[]> {
 	const vector = await embedText(query);
 	const limit = Math.max(1, Math.min(options?.limit ?? 30, 100));
+	const minScore = typeof options?.minScore === 'number'
+		? options?.minScore
+		: Number.parseFloat(env.SEMANTIC_SEARCH_MIN_SCORE ?? '0.20');
+	const threshold = Number.isFinite(minScore) ? minScore : 0.2;
 
 	const must: Array<Record<string, unknown>> = [];
 	if (options?.mediaType) {
@@ -542,6 +544,7 @@ export async function semanticSearch(query: string, options?: { mediaType?: Medi
 
 	const rows = response.result ?? [];
 	return rows
+		.filter((row) => typeof row.score === 'number' && row.score >= threshold)
 		.map((row) => {
 			const payload = row.payload ?? {};
 			return {

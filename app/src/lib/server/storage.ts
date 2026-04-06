@@ -53,6 +53,15 @@ export function getMediaRoots(): string[] {
 		.filter(Boolean);
 }
 
+export function isPathInsideRoot(candidatePath: string, rootPath: string): boolean {
+	const resolvedRoot = path.resolve(rootPath);
+	const resolvedCandidate = path.resolve(candidatePath);
+	return (
+		resolvedCandidate === resolvedRoot ||
+		resolvedCandidate.startsWith(`${resolvedRoot}${path.sep}`)
+	);
+}
+
 // Resolve a client-supplied relative path safely — prevents path traversal attacks
 export function resolveSafePath(relativePath: string): { fullPath: string; root: string } | null {
 	const roots = getMediaRoots();
@@ -64,18 +73,22 @@ export function resolveSafePath(relativePath: string): { fullPath: string; root:
 	// Determine which root this path belongs to by prefix
 	// Path format from client: "rootIndex/rest/of/path"
 	const [rootIndexStr, ...rest] = cleaned.split(path.sep);
+	if (!/^\d+$/.test(rootIndexStr ?? '')) {
+		return null;
+	}
+
 	const rootIndex = parseInt(rootIndexStr, 10);
 
 	if (isNaN(rootIndex) || rootIndex < 0 || rootIndex >= roots.length) {
 		return null;
 	}
 
-	const root = roots[rootIndex];
+	const root = path.resolve(roots[rootIndex]);
 	const relative = rest.join(path.sep);
-	const fullPath = path.join(root, relative);
+	const fullPath = path.resolve(root, relative || '.');
 
 	// Security: ensure resolved path is still inside the root
-	if (!fullPath.startsWith(path.resolve(root))) {
+	if (!isPathInsideRoot(fullPath, root)) {
 		return null;
 	}
 

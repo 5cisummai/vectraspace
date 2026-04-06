@@ -55,6 +55,7 @@ EMBEDDING_PROVIDER=multimodal
 MULTIMODAL_EMBEDDING_URL=http://127.0.0.1:8000/embed
 MULTIMODAL_EMBEDDING_MODEL=Qwen/Qwen3-VL-Embedding-2B
 MEDIA_ROOTS=/path/to/your/media
+EMBEDDING_REINDEX_CONCURRENCY=1
 ```
 
 ## Embedding Host
@@ -83,8 +84,9 @@ It returns normalized vectors in the format:
 
 1. Run Qdrant.
 2. Run `./run.sh`.
-3. Use the Reindex button in the UI, or call `POST /api/search/reindex`.
-4. Search from the top bar in the app.
+3. Set `EMBEDDING_REINDEX_CONCURRENCY` in [.env](.env) if you want more parallel reindexing.
+4. Use the Reindex button in the UI, or call `POST /api/search/reindex`.
+5. Search from the top bar in the app.
 
 ## Manual Commands
 

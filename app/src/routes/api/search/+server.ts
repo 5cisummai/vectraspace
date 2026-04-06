@@ -24,8 +24,12 @@ export const GET: RequestHandler = async ({ url }) => {
 	const parsedLimit = limitRaw ? Number.parseInt(limitRaw, 10) : undefined;
 	const limit = typeof parsedLimit === 'number' && !Number.isNaN(parsedLimit) ? parsedLimit : undefined;
 
+	const minScoreRaw = url.searchParams.get('minScore');
+	const parsedMinScore = minScoreRaw ? Number.parseFloat(minScoreRaw) : undefined;
+	const minScore = typeof parsedMinScore === 'number' && !Number.isNaN(parsedMinScore) ? parsedMinScore : undefined;
+
 	try {
-		const results = await semanticSearch(query, { mediaType, rootIndex, limit });
+		const results = await semanticSearch(query, { mediaType, rootIndex, limit, minScore });
 		return json({
 			query,
 			count: results.length,

@@ -1,8 +1,7 @@
 import { json, error } from '@sveltejs/kit';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { resolveSafePath } from '$lib/server/storage';
-import { indexFileByRelativePath } from '$lib/server/semantic';
+import { isPathInsideRoot, resolveSafePath } from '$lib/server/storage';
 import { env } from '$env/dynamic/private';
 import type { RequestHandler } from './$types';
 
@@ -32,11 +31,10 @@ export const POST: RequestHandler = async ({ request }) => {
 
 	if (!safeName) throw error(400, 'Invalid filename');
 
-	const destPath = path.join(resolved.fullPath, safeName);
+	const destPath = path.resolve(resolved.fullPath, safeName);
 
 	// Ensure destination is still inside the root after joining
-	const resolvedRoot = path.resolve(resolved.root);
-	if (!path.resolve(destPath).startsWith(resolvedRoot)) {
+	if (!isPathInsideRoot(destPath, resolved.root)) {
 		throw error(400, 'Invalid destination');
 	}
 
@@ -48,12 +46,6 @@ export const POST: RequestHandler = async ({ request }) => {
 	await fs.writeFile(destPath, Buffer.from(arrayBuffer));
 
 	const relativePath = path.join(destination, safeName).split(path.sep).join('/');
-	let indexed = false;
-	try {
-		indexed = await indexFileByRelativePath(relativePath);
-	} catch (err) {
-		console.warn('Incremental semantic indexing failed:', relativePath, err);
-	}
 
-	return json({ success: true, name: safeName, indexed });
+	return json({ success: true, name: safeName, relativePath });
 };

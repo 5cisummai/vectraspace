@@ -12,7 +12,8 @@
 		AlertCircle,
 		Search,
 		RefreshCw,
-		X
+		X,
+		FolderPlus
 	} from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
@@ -69,14 +70,24 @@
 	let semanticError = $state<string | null>(null);
 	let reindexing = $state(false);
 	let reindexMessage = $state<string | null>(null);
-	let reindexConcurrency = $state(1);
+	let selectedPaths = $state<string[]>([]);
+	let selectionAnchorPath = $state<string | null>(null);
 	let deletingPath = $state<string | null>(null);
+	let deletingSelected = $state(false);
+	let creatingFolder = $state(false);
 
 	let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 	let searchAbortController: AbortController | null = null;
 
 	let isSemanticMode = $derived(semanticQuery.trim().length > 0);
+	let canCreateFolder = $derived(!isSemanticMode && currentPath !== '');
 	let displayEntries = $derived(isSemanticMode ? semanticResults : entries);
+	let selectedPathSet = $derived(new Set(selectedPaths));
+	let selectedCount = $derived(selectedPaths.length);
+	let selectedEntries = $derived(displayEntries.filter((entry) => selectedPathSet.has(entry.path)));
+	let hasVisibleImages = $derived(
+		displayEntries.some((entry) => entry.type === 'file' && entry.mediaType === 'image')
+	);
 
 	let breadcrumbs = $derived.by(() => {
 		if (!currentPath) return [];
@@ -91,6 +102,8 @@
 		loading = true;
 		error = null;
 		currentPath = path;
+		selectedPaths = [];
+		selectionAnchorPath = null;
 		try {
 			const res = await fetch(`/api/browse${path ? '/' + path : ''}`);
 			if (!res.ok) throw new Error(await res.text());
@@ -129,6 +142,8 @@
 		semanticResults = [];
 		semanticError = null;
 		semanticLoading = false;
+		selectedPaths = [];
+		selectionAnchorPath = null;
 		if (searchDebounceTimer) {
 			clearTimeout(searchDebounceTimer);
 			searchDebounceTimer = null;
@@ -190,34 +205,144 @@
 
 	function handleSemanticInput() {
 		reindexMessage = null;
+		selectedPaths = [];
+		selectionAnchorPath = null;
 		queueSemanticSearch();
 	}
 
 	function handleSemanticFilterChange() {
 		reindexMessage = null;
+		selectedPaths = [];
+		selectionAnchorPath = null;
 		if (isSemanticMode) queueSemanticSearch();
 	}
 
 	function canDeleteEntry(entry: Entry) {
-		return entry.type === 'file' && entry.mediaType === 'image';
+		if (entry.type === 'file') return true;
+		if (entry.type !== 'directory') return false;
+		return !isDriveRootEntry(entry);
+	}
+
+	function canSelectEntry(entry: Entry) {
+		return entry.type === 'file';
+	}
+
+	function isDriveRootEntry(entry: Entry) {
+		if (entry.type !== 'directory') return false;
+		return /^\d+$/.test(entry.path);
+	}
+
+	function isSelected(path: string) {
+		return selectedPathSet.has(path);
+	}
+
+	function selectEntry(entry: Entry) {
+		if (!canSelectEntry(entry)) return;
+		selectedPaths = [entry.path];
+		selectionAnchorPath = entry.path;
+	}
+
+	function selectRangeTo(entry: Entry) {
+		if (!canSelectEntry(entry)) return;
+
+		const selectableEntries = displayEntries.filter(canSelectEntry);
+		const targetIndex = selectableEntries.findIndex((item) => item.path === entry.path);
+		const anchorIndex = selectionAnchorPath
+			? selectableEntries.findIndex((item) => item.path === selectionAnchorPath)
+			: -1;
+
+		if (targetIndex === -1 || anchorIndex === -1) {
+			selectEntry(entry);
+			return;
+		}
+
+		const start = Math.min(anchorIndex, targetIndex);
+		const end = Math.max(anchorIndex, targetIndex);
+		selectedPaths = selectableEntries.slice(start, end + 1).map((item) => item.path);
+		selectionAnchorPath = entry.path;
+	}
+
+	function toggleSelection(entry: Entry) {
+		if (!canSelectEntry(entry)) return;
+		const nextSelectedPaths = isSelected(entry.path)
+			? selectedPaths.filter((path) => path !== entry.path)
+			: [...selectedPaths, entry.path];
+		selectedPaths = nextSelectedPaths;
+		selectionAnchorPath = nextSelectedPaths.includes(entry.path)
+			? entry.path
+			: nextSelectedPaths[nextSelectedPaths.length - 1] ?? null;
+	}
+
+	function handleEntryClick(event: MouseEvent, entry: Entry) {
+		if (!canSelectEntry(entry)) {
+			openEntry(entry);
+			return;
+		}
+
+		if (event.shiftKey) {
+			selectRangeTo(entry);
+			return;
+		}
+
+		if (isSelected(entry.path)) {
+			openEntry(entry);
+			return;
+		}
+
+		selectEntry(entry);
+	}
+
+	function clearSelection() {
+		selectedPaths = [];
+		selectionAnchorPath = null;
+	}
+
+	function selectAllVisible() {
+		const visiblePaths = displayEntries.filter(canSelectEntry).map((entry) => entry.path);
+		selectedPaths = Array.from(new Set([...selectedPaths, ...visiblePaths]));
+		selectionAnchorPath = visiblePaths[visiblePaths.length - 1] ?? selectionAnchorPath;
+	}
+
+	function selectVisibleImages() {
+		const visibleImagePaths = displayEntries
+			.filter((entry) => entry.type === 'file' && entry.mediaType === 'image')
+			.map((entry) => entry.path);
+		if (visibleImagePaths.length === 0) return;
+		selectedPaths = Array.from(new Set([...selectedPaths, ...visibleImagePaths]));
+		selectionAnchorPath = visibleImagePaths[visibleImagePaths.length - 1] ?? selectionAnchorPath;
+	}
+
+	async function deletePath(relativePath: string) {
+		const res = await fetch(`/api/delete/${encodeURI(relativePath)}`, { method: 'DELETE' });
+		if (!res.ok) throw new Error(await res.text());
+	}
+
+	async function refreshCurrentView() {
+		if (isSemanticMode) {
+			await runSemanticSearch();
+		} else {
+			await browse(currentPath);
+		}
 	}
 
 	async function deleteEntry(entry: Entry) {
-		if (!canDeleteEntry(entry) || deletingPath) return;
+		if (!canDeleteEntry(entry) || deletingPath || deletingSelected) return;
 
-		const confirmed = window.confirm(`Delete "${entry.name}"? This cannot be undone.`);
+		const confirmed = window.confirm(
+			entry.type === 'directory'
+				? `Delete folder "${entry.name}" and everything inside it? This cannot be undone.`
+				: `Delete "${entry.name}"? This cannot be undone.`
+		);
 		if (!confirmed) return;
 
 		deletingPath = entry.path;
 		try {
-			const res = await fetch(`/api/delete/${encodeURI(entry.path)}`, { method: 'DELETE' });
-			if (!res.ok) throw new Error(await res.text());
-
-			if (isSemanticMode) {
-				await runSemanticSearch();
-			} else {
-				await browse(currentPath);
+			await deletePath(entry.path);
+			selectedPaths = selectedPaths.filter((path) => path !== entry.path);
+			if (selectionAnchorPath === entry.path) {
+				selectionAnchorPath = selectedPaths[selectedPaths.length - 1] ?? null;
 			}
+			await refreshCurrentView();
 		} catch (e) {
 			if (isSemanticMode) {
 				semanticError = e instanceof Error ? e.message : 'Delete failed';
@@ -229,20 +354,68 @@
 		}
 	}
 
-	function clampConcurrency(value: number): number {
-		if (!Number.isFinite(value) || value < 1) return 1;
-		return Math.min(Math.floor(value), 8);
+	async function deleteSelectedEntries() {
+		if (deletingPath || deletingSelected || selectedEntries.length === 0) return;
+
+		const confirmed = window.confirm(
+			`Delete ${selectedEntries.length} selected item${selectedEntries.length === 1 ? '' : 's'}? This cannot be undone.`
+		);
+		if (!confirmed) return;
+
+		deletingSelected = true;
+		try {
+			const results = await Promise.allSettled(selectedEntries.map((entry) => deletePath(entry.path)));
+			const failures = results.filter((result) => result.status === 'rejected');
+			clearSelection();
+			await refreshCurrentView();
+
+			if (failures.length > 0) {
+				const message = `${failures.length} selected item${failures.length === 1 ? '' : 's'} failed to delete`;
+				if (isSemanticMode) {
+					semanticError = message;
+				} else {
+					error = message;
+				}
+			}
+		} catch (e) {
+			if (isSemanticMode) {
+				semanticError = e instanceof Error ? e.message : 'Delete selected failed';
+			} else {
+				error = e instanceof Error ? e.message : 'Delete selected failed';
+			}
+		} finally {
+			deletingSelected = false;
+		}
+	}
+
+	async function createFolder() {
+		if (!canCreateFolder || creatingFolder) return;
+		const name = window.prompt('New folder name:');
+		if (!name || !name.trim()) return;
+		const folderName = name.trim();
+		if (/[\/\\]/.test(folderName)) {
+			window.alert('Folder name cannot contain slashes.');
+			return;
+		}
+		creatingFolder = true;
+		const newPath = [currentPath, folderName].filter(Boolean).join('/');
+		try {
+			const res = await fetch(`/api/mkdir/${encodeURI(newPath)}`, { method: 'POST' });
+			if (!res.ok) throw new Error(await res.text());
+			await browse(currentPath);
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'Failed to create folder';
+		} finally {
+			creatingFolder = false;
+		}
 	}
 
 	async function reindexSemantic() {
 		reindexing = true;
 		reindexMessage = null;
 		try {
-			const concurrency = clampConcurrency(reindexConcurrency);
 			const res = await fetch('/api/search/reindex', {
 				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ concurrency })
 			});
 			if (!res.ok) throw new Error(await res.text());
 			const body = (await res.json()) as {
@@ -360,6 +533,12 @@
 
 			<!-- Actions -->
 			<div class="flex items-center gap-2">
+				{#if canCreateFolder}
+					<Button size="sm" variant="outline" onclick={createFolder} disabled={creatingFolder}>
+						<FolderPlus class="mr-2 h-3.5 w-3.5" />
+						New Folder
+					</Button>
+				{/if}
 				<Button size="sm" onclick={() => goto(resolve(`/upload?dest=${currentPath}`))}>
 					<Upload class="mr-2 h-3.5 w-3.5" />
 					Upload
@@ -428,18 +607,6 @@
 				</div>
 
 				<div class="flex gap-2">
-					<div class="flex items-center gap-2 rounded-md border border-border bg-background px-2">
-						<span class="text-xs text-muted-foreground">Parallel</span>
-						<input
-							type="number"
-							min="1"
-							max="8"
-							bind:value={reindexConcurrency}
-							class="h-9 w-16 border-0 bg-transparent text-sm outline-none"
-							aria-label="Parallel embeddings"
-						/>
-					</div>
-
 					<select
 						bind:value={semanticMediaType}
 						onchange={handleSemanticFilterChange}
@@ -464,12 +631,32 @@
 						{/each}
 					</select>
 
-					<Button variant="outline" size="sm" onclick={reindexSemantic} disabled={reindexing}>
-						<RefreshCw class="mr-2 h-3.5 w-3.5 {reindexing ? 'animate-spin' : ''}" />
-						Reindex
-					</Button>
+					{#if hasVisibleImages}
+						<Button variant="outline" size="sm" onclick={selectVisibleImages}>
+							Select images
+						</Button>
+					{/if}
 				</div>
 			</div>
+
+			{#if selectedCount > 0}
+				<div class="mt-3 flex flex-col gap-2 rounded-md border border-border bg-background/60 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+					<span class="text-xs text-muted-foreground">
+						{selectedCount} selected
+					</span>
+					<div class="flex flex-wrap gap-2">
+						<Button variant="outline" size="sm" onclick={selectAllVisible}>
+							Select all visible
+						</Button>
+						<Button variant="outline" size="sm" onclick={clearSelection}>
+							Clear selection
+						</Button>
+						<Button variant="destructive" size="sm" onclick={deleteSelectedEntries} disabled={deletingSelected}>
+							Delete selected
+						</Button>
+					</div>
+				</div>
+			{/if}
 
 			<div class="mt-2 flex items-center gap-3 text-xs text-muted-foreground">
 				{#if isSemanticMode}
@@ -535,55 +722,86 @@
 		{:else if viewMode === 'grid'}
 			<div class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
 				{#each displayEntries as entry (entry.path)}
-					<ContextMenu.Root>
-						<ContextMenu.Trigger>
-							{#snippet child({ props })}
-								<button
-									{...props}
-									onclick={() => openEntry(entry)}
-									class="group flex flex-col items-center gap-2 rounded-xl border border-border bg-card p-4 text-center transition-all duration-150 hover:border-primary/50 hover:bg-accent"
-								>
-									{#if entry.type === 'file' && entry.mediaType === 'image'}
-										<div
-											class="h-10 w-10 shrink-0 overflow-hidden rounded border border-border transition-transform duration-150 group-hover:scale-110"
-										>
-											<img
-												src="/api/stream/{entry.path}"
-												alt={entry.name}
-												class="h-full w-full object-cover"
-												loading="lazy"
-											/>
+					<div class="relative">
+						{#if isSelected(entry.path)}
+							<input
+								type="checkbox"
+								checked={true}
+								onclick={(e) => { e.stopPropagation(); toggleSelection(entry); }}
+								aria-label={`Deselect ${entry.name}`}
+								class="absolute left-2 top-2 z-20 h-4 w-4 cursor-pointer rounded border-border text-primary shadow"
+							/>
+						{/if}
+						<ContextMenu.Root>
+							<ContextMenu.Trigger>
+								{#snippet child({ props })}
+									<button
+										{...props}
+										onclick={(event) => handleEntryClick(event, entry)}
+										class="group block w-full overflow-hidden rounded-xl border bg-card text-left transition-all duration-150 hover:border-primary/50 {isSelected(entry.path) ? 'border-primary ring-1 ring-primary/40' : 'border-border'}"
+									>
+										<!-- Full-bleed media area -->
+										<div class="aspect-square w-full overflow-hidden bg-muted">
+											{#if entry.type === 'file' && entry.mediaType === 'image'}
+												<img
+													src="/api/stream/{entry.path}"
+													alt={entry.name}
+													class="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105"
+													loading="lazy"
+												/>
+											{:else if entry.type === 'file' && entry.mediaType === 'video'}
+												<video
+													src="/api/stream/{entry.path}#t=0.001"
+													class="h-full w-full object-cover"
+													preload="metadata"
+													muted
+													playsinline
+												></video>
+											{:else}
+												<div class="flex h-full w-full items-center justify-center">
+													<MediaIcon
+														entryType={entry.type}
+														mediaType={entry.mediaType}
+														class="h-12 w-12
+															{entry.type === 'directory' ? 'text-amber-400' : ''}
+															{entry.mediaType === 'audio' ? 'text-purple-400' : ''}
+															{entry.mediaType === 'document' ? 'text-red-400' : ''}
+															{entry.mediaType === 'other' ? 'text-muted-foreground' : ''}"
+													/>
+												</div>
+											{/if}
 										</div>
-									{:else}
-										<MediaIcon
-											entryType={entry.type}
-											mediaType={entry.mediaType}
-											class="h-10 w-10 transition-transform duration-150 group-hover:scale-110
-        {entry.type === 'directory' ? 'text-amber-400' : ''}
-        {entry.mediaType === 'video' ? 'text-blue-400' : ''}
-        {entry.mediaType === 'audio' ? 'text-purple-400' : ''}
-        {entry.mediaType === 'image' ? 'text-green-400' : ''}
-        {entry.mediaType === 'document' ? 'text-red-400' : ''}
-        {entry.mediaType === 'other' ? 'text-muted-foreground' : ''}"
-										/>
-									{/if}
-									<span class="w-full truncate text-xs font-medium text-foreground">{entry.name}</span>
-									<Badge variant={getBadgeVariant(entry)} class="text-[10px]">
-										{getBadgeLabel(entry)}
-									</Badge>
-								</button>
-							{/snippet}
-						</ContextMenu.Trigger>
-						<ContextMenu.Content class="w-48">
-							<ContextMenu.Item onSelect={() => openEntry(entry)}>Open</ContextMenu.Item>
-							{#if canDeleteEntry(entry)}
-								<ContextMenu.Separator />
-								<ContextMenu.Item variant="destructive" onSelect={() => deleteEntry(entry)}>
-									Delete picture
-								</ContextMenu.Item>
-							{/if}
-						</ContextMenu.Content>
-					</ContextMenu.Root>
+										<!-- Info strip -->
+										<div class="flex items-center gap-1.5 px-2 py-1.5">
+											<span class="min-w-0 flex-1 truncate text-xs font-medium leading-snug text-foreground">{entry.name}</span>
+											<Badge variant={getBadgeVariant(entry)} class="shrink-0 text-[10px]">
+												{getBadgeLabel(entry)}
+											</Badge>
+										</div>
+									</button>
+								{/snippet}
+							</ContextMenu.Trigger>
+							<ContextMenu.Content class="w-52">
+								<ContextMenu.Item onSelect={() => openEntry(entry)}>Open</ContextMenu.Item>
+								{#if canSelectEntry(entry)}
+									<ContextMenu.Item onSelect={() => toggleSelection(entry)}>
+										{isSelected(entry.path) ? 'Deselect' : 'Select'}
+									</ContextMenu.Item>
+								{/if}
+								{#if selectedCount > 0}
+									<ContextMenu.Item variant="destructive" onSelect={deleteSelectedEntries}>
+										Delete selected ({selectedCount})
+									</ContextMenu.Item>
+								{/if}
+								{#if canDeleteEntry(entry)}
+									<ContextMenu.Separator />
+									<ContextMenu.Item variant="destructive" onSelect={() => deleteEntry(entry)}>
+										{entry.type === 'directory' ? 'Delete folder' : 'Delete'}
+									</ContextMenu.Item>
+								{/if}
+							</ContextMenu.Content>
+						</ContextMenu.Root>
+					</div>
 				{/each}
 			</div>
 
@@ -593,6 +811,7 @@
 				<table class="w-full text-sm">
 					<thead>
 						<tr class="border-b border-border bg-muted/50">
+							<th class="w-10 px-3 py-2.5"></th>
 							<th class="px-4 py-2.5 text-left font-medium text-muted-foreground">Name</th>
 							<th
 								class="hidden px-4 py-2.5 text-left font-medium text-muted-foreground sm:table-cell"
@@ -615,10 +834,25 @@
 									{#snippet child({ props })}
 										<tr
 											{...props}
-											onclick={() => openEntry(entry)}
-											class="cursor-pointer border-border transition-colors hover:bg-muted/50
-												{i !== displayEntries.length - 1 ? 'border-b' : ''}"
+											onclick={(event) => handleEntryClick(event, entry)}
+											class={`cursor-pointer border-border transition-colors hover:bg-muted/50 ${
+												isSelected(entry.path) ? 'bg-primary/5' : ''
+											}${i !== displayEntries.length - 1 ? ' border-b' : ''}`}
 										>
+											<td class="w-10 px-3 py-3">
+												{#if isSelected(entry.path)}
+													<input
+														type="checkbox"
+														checked={true}
+														onclick={(e) => {
+															e.stopPropagation();
+															toggleSelection(entry);
+														}}
+														aria-label={`Deselect ${entry.name}`}
+														class="h-4 w-4 cursor-pointer rounded border-border text-primary shadow-sm"
+													/>
+												{/if}
+											</td>
 											<td class="flex items-center gap-3 px-4 py-3">
 												{#if entry.type === 'file' && entry.mediaType === 'image'}
 													<div class="h-8 w-8 shrink-0 overflow-hidden rounded border border-border">
@@ -629,18 +863,28 @@
 															loading="lazy"
 														/>
 													</div>
+												{:else if entry.type === 'file' && entry.mediaType === 'video'}
+													<div class="h-8 w-8 shrink-0 overflow-hidden rounded border border-border">
+														<video
+															src="/api/stream/{entry.path}#t=0.001"
+															class="h-full w-full object-cover"
+															preload="metadata"
+															muted
+															playsinline
+														></video>
+													</div>
 												{:else}
 													<MediaIcon
 														entryType={entry.type}
 														mediaType={entry.mediaType}
 														class="h-4 w-4 shrink-0
-        {entry.type === 'directory' ? 'text-amber-400' : ''}
-        {entry.mediaType === 'video' ? 'text-blue-400' : ''}
-        {entry.mediaType === 'audio' ? 'text-purple-400' : ''}
-        {entry.mediaType === 'image' ? 'text-green-400' : ''}
-        {entry.mediaType === 'document' ? 'text-red-400' : ''}
-        {entry.mediaType === 'other' ? 'text-muted-foreground' : ''}"
-												/>
+															{entry.type === 'directory' ? 'text-amber-400' : ''}
+															{entry.mediaType === 'video' ? 'text-blue-400' : ''}
+															{entry.mediaType === 'audio' ? 'text-purple-400' : ''}
+															{entry.mediaType === 'image' ? 'text-green-400' : ''}
+															{entry.mediaType === 'document' ? 'text-red-400' : ''}
+															{entry.mediaType === 'other' ? 'text-muted-foreground' : ''}"
+													/>
 												{/if}
 												<span class="truncate font-medium text-foreground">{entry.name}</span>
 											</td>
@@ -658,12 +902,22 @@
 										</tr>
 									{/snippet}
 								</ContextMenu.Trigger>
-								<ContextMenu.Content class="w-48">
+								<ContextMenu.Content class="w-52">
 									<ContextMenu.Item onSelect={() => openEntry(entry)}>Open</ContextMenu.Item>
+									{#if canSelectEntry(entry)}
+										<ContextMenu.Item onSelect={() => toggleSelection(entry)}>
+											{isSelected(entry.path) ? 'Deselect' : 'Select'}
+										</ContextMenu.Item>
+									{/if}
+									{#if selectedCount > 0}
+										<ContextMenu.Item variant="destructive" onSelect={deleteSelectedEntries}>
+											Delete selected ({selectedCount})
+										</ContextMenu.Item>
+									{/if}
 									{#if canDeleteEntry(entry)}
 										<ContextMenu.Separator />
 										<ContextMenu.Item variant="destructive" onSelect={() => deleteEntry(entry)}>
-											Delete picture
+											{entry.type === 'directory' ? 'Delete folder' : 'Delete'}
 										</ContextMenu.Item>
 									{/if}
 								</ContextMenu.Content>

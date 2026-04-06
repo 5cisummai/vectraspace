@@ -1,17 +1,15 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { uploadManager } from '$lib/upload-manager';
 	import {
-    ArrowLeft,
-    Download,
-    FileQuestion,
-    Volume2,
-    Maximize,
-    Upload,
-    X,
-    CheckCircle,
-    AlertCircle,
-    File as FileIcon
-} from '@lucide/svelte';
+		ArrowLeft,
+		Upload,
+		X,
+		CheckCircle,
+		AlertCircle,
+		RefreshCw,
+		File as FileIcon
+	} from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Progress } from '$lib/components/ui/progress';
 	import { Separator } from '$lib/components/ui/separator';
@@ -25,20 +23,7 @@
 	let { data }: Props = $props();
 
 	const dest = $derived(data.dest);
-
-	type UploadStatus = 'pending' | 'uploading' | 'done' | 'error';
-
-	interface UploadFile {
-		id: string;
-		file: globalThis.File;
-		status: UploadStatus;
-		progress: number;
-		error?: string;
-	}
-
-	let files = $state<UploadFile[]>([]);
 	let dragOver = $state(false);
-	let uploading = $state(false);
 
 	function formatSize(bytes: number) {
 		if (bytes < 1024) return `${bytes} B`;
@@ -47,26 +32,8 @@
 		return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
 	}
 
-	function createUploadId() {
-		if (globalThis.crypto?.randomUUID) {
-			return globalThis.crypto.randomUUID();
-		}
-
-		return `upload-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-	}
-
 	function addFiles(incoming: FileList | File[]) {
-		const newFiles: UploadFile[] = Array.from(incoming).map((f) => ({
-			id: createUploadId(),
-			file: f,
-			status: 'pending',
-			progress: 0
-		}));
-		files = [...files, ...newFiles];
-	}
-
-	function removeFile(id: string) {
-		files = files.filter((f) => f.id !== id);
+		uploadManager.addFiles(dest, incoming);
 	}
 
 	function onFileInput(e: Event) {
@@ -90,65 +57,15 @@
 		dragOver = false;
 	}
 
-	async function uploadFile(item: UploadFile) {
-		item.status = 'uploading';
-		item.progress = 0;
-		files = files; // trigger reactivity
-
-		return new Promise<void>((resolve) => {
-			const formData = new FormData();
-			formData.append('file', item.file);
-			formData.append('destination', dest);
-
-			const xhr = new XMLHttpRequest();
-
-			xhr.upload.addEventListener('progress', (e) => {
-				if (e.lengthComputable) {
-					item.progress = Math.round((e.loaded / e.total) * 100);
-					files = files; // trigger reactivity
-				}
-			});
-
-			xhr.addEventListener('load', () => {
-				if (xhr.status >= 200 && xhr.status < 300) {
-					item.status = 'done';
-					item.progress = 100;
-				} else {
-					item.status = 'error';
-					item.error = `Server error ${xhr.status}`;
-				}
-				files = files;
-				resolve();
-			});
-
-			xhr.addEventListener('error', () => {
-				item.status = 'error';
-				item.error = 'Network error';
-				files = files;
-				resolve();
-			});
-
-			xhr.open('POST', '/api/upload');
-			xhr.send(formData);
-		});
-	}
-
-	async function uploadAll() {
-		uploading = true;
-		const pending = files.filter((f) => f.status === 'pending');
-		for (const item of pending) {
-			await uploadFile(item);
-		}
-		uploading = false;
-	}
-
 	function goBack() {
 		goto(`/?browse=${dest}`);
 	}
 
-	const allDone = $derived(files.length > 0 && files.every((f) => f.status === 'done'));
-	const hasPending = $derived(files.some((f) => f.status === 'pending'));
-	const hasErrors = $derived(files.some((f) => f.status === 'error'));
+	const files = $derived($uploadManager.items);
+	const busy = $derived($uploadManager.batchPhase === 'uploading' || $uploadManager.batchPhase === 'indexing');
+	const allDone = $derived(files.length > 0 && files.every((file) => file.status === 'done'));
+	const hasPending = $derived(files.some((file) => file.status === 'pending'));
+	const hasErrors = $derived(files.some((file) => file.status === 'error'));
 </script>
 
 <div class="min-h-screen bg-background text-foreground">
@@ -211,19 +128,34 @@
 							<Button
 								variant="ghost"
 								size="sm"
-								onclick={() => files = files.filter(f => f.status !== 'error')}
+								onclick={uploadManager.clearErrors}
 							>
 								Clear errors
 							</Button>
 						{/if}
 						{#if hasPending}
-							<Button size="sm" onclick={uploadAll} disabled={uploading}>
+							<Button size="sm" onclick={() => uploadManager.uploadAll()} disabled={busy}>
 								<Upload class="mr-2 h-3.5 w-3.5" />
 								Upload all
 							</Button>
 						{/if}
 					</div>
 				</div>
+
+				{#if $uploadManager.batchPhase === 'uploading'}
+					<div class="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+						Uploads are running in the background. You can leave this page and indexing will start when the upload batch finishes.
+					</div>
+				{:else if $uploadManager.batchPhase === 'indexing'}
+					<div class="flex items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+						<RefreshCw class="h-4 w-4 animate-spin" />
+						Indexing uploaded files...
+					</div>
+				{:else if $uploadManager.batchMessage}
+					<div class="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+						{$uploadManager.batchMessage}
+					</div>
+				{/if}
 
 				<Card.Root>
 					<Card.Content class="divide-y divide-border p-0">
@@ -235,9 +167,9 @@
 								<!-- Name + progress -->
 								<div class="min-w-0 flex-1">
 									<div class="flex items-center justify-between gap-2">
-										<span class="truncate text-sm font-medium">{item.file.name}</span>
+										<span class="truncate text-sm font-medium">{item.name}</span>
 										<span class="shrink-0 text-xs text-muted-foreground">
-											{formatSize(item.file.size)}
+											{formatSize(item.size)}
 										</span>
 									</div>
 									{#if item.status === 'uploading'}
@@ -258,8 +190,8 @@
 										variant="ghost"
 										size="icon"
 										class="h-7 w-7 shrink-0"
-										onclick={() => removeFile(item.id)}
-										disabled={uploading}
+										onclick={() => uploadManager.removeFile(item.id)}
+										disabled={busy}
 									>
 										<X class="h-3.5 w-3.5" />
 									</Button>
@@ -280,9 +212,14 @@
 					<p class="mt-1 text-sm text-muted-foreground">
 						{files.length} file{files.length !== 1 ? 's' : ''} added to your library
 					</p>
+					{#if $uploadManager.lastIndexedCount > 0}
+						<p class="mt-1 text-sm text-muted-foreground">
+							{$uploadManager.lastIndexedCount} file{$uploadManager.lastIndexedCount === 1 ? '' : 's'} indexed
+						</p>
+					{/if}
 				</div>
 				<div class="flex gap-2">
-					<Button variant="outline" onclick={() => files = []}>
+					<Button variant="outline" onclick={uploadManager.clearFinished}>
 						Upload more
 					</Button>
 					<Button onclick={goBack}>
