@@ -1,11 +1,12 @@
 {
 	"name": "vectraspace",
-	"version": "0.1.1",
+	"version": "0.1.2",
 	"type": "module",
 	"description": "Vectraspace media server for local media search and management",
 	"license": "MIT",
 	"files": [
 		"bin",
+		"app",
 		"docker-compose.yml",
 		"embedding-host",
 		"scripts",
