@@ -34,6 +34,9 @@ pnpm-debug.log*
 *.sln
 *.sw?
 
+# Vectraspace generated Docker Compose override
+.vectraspace.compose.override.yml
+
 
 
 # Python

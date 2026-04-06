@@ -138,13 +138,15 @@ def _load_model_if_needed(model_name: str) -> None:
 
         model_kwargs = dict(load_kwargs)
         model_kwargs["torch_dtype"] = _torch_dtype_for_device(_device)
+        # This reduces peak memory pressure during model loading.
+        model_kwargs["low_cpu_mem_usage"] = True
 
         if Qwen3VLProcessor is not None:
             _processor = Qwen3VLProcessor.from_pretrained(model_name, padding_side="right", **load_kwargs)
         else:
             raise RuntimeError("Qwen3VLProcessor is not available; ensure transformers>=4.57.0 is installed")
 
-        model_kwargs.pop("trust_remote_code", None)  # AutoModel will error if trust_remote_code is passed and the model doesn't have a local config
+        model_kwargs.pop("trust_remote_code", None)
         if Qwen3VLForEmbedding is not None:
             _model = Qwen3VLForEmbedding.from_pretrained(model_name, **model_kwargs)
         else:

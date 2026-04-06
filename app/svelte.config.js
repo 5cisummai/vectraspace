@@ -14,6 +14,11 @@ const config = {
 		}
 	},
 	kit: {
+		csrf: {
+			// This app is typically run behind local Docker/proxy setups where host/origin
+			// headers can differ, which can incorrectly block API POSTs (e.g. uploads).
+			checkOrigin: false
+		},
 		// adapter-auto only supports some environments, see https://svelte.dev/docs/kit/adapter-auto for a list.
 		// If your environment is not supported, or you settled on a specific environment, switch out the adapter.
 		// See https://svelte.dev/docs/kit/adapters for more information about adapters.

@@ -3,8 +3,6 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_DIR="$ROOT_DIR/app"
-EMBED_DIR="$ROOT_DIR/embedding-host"
-EMBED_VENV_DIR="$EMBED_DIR/.venv"
 
 need_cmd() {
 	if ! command -v "$1" >/dev/null 2>&1; then
@@ -13,39 +11,54 @@ need_cmd() {
 	fi
 }
 
-need_cmd pnpm
-need_cmd python3
+need_cmd docker
+need_cmd curl
 
-if [[ ! -d "$EMBED_VENV_DIR" ]]; then
-	echo "Error: embedding venv not found at $EMBED_VENV_DIR"
-	echo "Run ./setup.sh first."
+if [[ ! -f "$APP_DIR/.env" ]]; then
+	echo "Error: .env not found at $APP_DIR/.env"
+	echo "Run ./setup.sh or copy .env.example to .env first."
 	exit 1
 fi
 
-cleanup() {
-	echo ""
-	echo "[run] Shutting down services..."
-	if [[ -n "${EMBED_PID:-}" ]] && kill -0 "$EMBED_PID" 2>/dev/null; then
-		kill "$EMBED_PID" 2>/dev/null || true
+set -a
+# shellcheck disable=SC1090
+source "$APP_DIR/.env"
+set +a
+
+APP_PORT="${PORT:-3000}"
+
+echo "[run] Starting compose services..."
+cd "$ROOT_DIR"
+docker compose up -d --build qdrant embedding-host app
+
+echo "[run] Waiting for embedding host on http://127.0.0.1:8000/health ..."
+for _ in {1..60}; do
+	if curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1; then
+		break
 	fi
-}
+	sleep 2
+done
 
-trap cleanup EXIT INT TERM
-
-echo "[run] Starting embedding host on http://127.0.0.1:8000 ..."
-cd "$EMBED_DIR"
-# shellcheck disable=SC1091
-source "$EMBED_VENV_DIR/bin/activate"
-python -m uvicorn app:app --host 127.0.0.1 --port 8000 &
-EMBED_PID=$!
-
-# Let the embedding service fail fast if startup is broken.
-sleep 1
-if ! kill -0 "$EMBED_PID" 2>/dev/null; then
-	echo "Error: embedding host failed to start."
+if ! curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1; then
+	echo "Error: embedding host did not become ready."
+	docker compose logs --tail=100 embedding-host
 	exit 1
 fi
 
-echo "[run] Starting app dev server..."
-cd "$APP_DIR"
-pnpm run preview --host
+echo "[run] Waiting for app on http://127.0.0.1:${APP_PORT} ..."
+for _ in {1..60}; do
+	if curl -fsS "http://127.0.0.1:${APP_PORT}" >/dev/null 2>&1; then
+		break
+	fi
+	sleep 2
+done
+
+if ! curl -fsS "http://127.0.0.1:${APP_PORT}" >/dev/null 2>&1; then
+	echo "Error: app did not become ready."
+	docker compose logs --tail=100 app
+	exit 1
+fi
+
+echo "[run] Ready: app http://127.0.0.1:${APP_PORT}"
+echo "[run] Use 'docker compose logs -f --tail=100' to follow logs."
+echo "[run] Use 'docker compose down' to stop services."

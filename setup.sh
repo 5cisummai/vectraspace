@@ -3,8 +3,6 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_DIR="$ROOT_DIR/app"
-EMBED_DIR="$ROOT_DIR/embedding-host"
-EMBED_VENV_DIR="$EMBED_DIR/.venv"
 
 need_cmd() {
 	if ! command -v "$1" >/dev/null 2>&1; then
@@ -14,45 +12,22 @@ need_cmd() {
 }
 
 echo "[setup] Validating required tools..."
-need_cmd python3.11
-need_cmd pnpm
+need_cmd docker
 
-if [[ ! -f "$APP_DIR/package.json" ]]; then
-	echo "Error: app package.json not found at $APP_DIR"
-	exit 1
-fi
-
-if [[ ! -f "$EMBED_DIR/requirements.txt" ]]; then
-	echo "Error: embedding host requirements.txt not found at $EMBED_DIR"
-	exit 1
-fi
-
-echo "[setup] Installing Node dependencies in app/..."
-cd "$APP_DIR"
-pnpm install
-
-echo "[setup] Building app/..."
-pnpm build
-
-echo "[setup] Creating/updating Python venv in embedding-host/..."
-cd "$EMBED_DIR"
-if [[ -d "$EMBED_VENV_DIR" ]]; then
-	venv_version="$($EMBED_VENV_DIR/bin/python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || true)"
-	if [[ "$venv_version" != "3.11" ]]; then
-		echo "[setup] Existing venv uses Python ${venv_version:-unknown}; recreating with Python 3.11..."
-		rm -rf "$EMBED_VENV_DIR"
+if [[ ! -f "$APP_DIR/.env" ]]; then
+	if [[ -f "$ROOT_DIR/.env.example" ]]; then
+		cp "$ROOT_DIR/.env.example" "$APP_DIR/.env"
+		echo "[setup] Created .env from .env.example. Update MEDIA_ROOTS before starting the app."
+	else
+		echo "Error: .env.example not found at $ROOT_DIR"
+		exit 1
 	fi
 fi
 
-if [[ ! -d "$EMBED_VENV_DIR" ]]; then
-	python3.11 -m venv "$EMBED_VENV_DIR"
-fi
-
-# shellcheck disable=SC1091
-source "$EMBED_VENV_DIR/bin/activate"
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-python -m py_compile app.py
+echo "[setup] Validating compose stack..."
+cd "$ROOT_DIR"
+docker compose config >/dev/null
+docker compose build app embedding-host
 
 echo "[setup] Done."
 echo "[setup] Next: run './run.sh' from $ROOT_DIR"

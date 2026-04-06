@@ -7,44 +7,73 @@ This workspace contains two parts:
 
 ## Quick Start
 
-From the workspace root:
+Install globally:
 
 ```bash
-./setup.sh
-./run.sh
+npm install -g vectraspace
 ```
+
+If npm global install fails on macOS/Linux due to permissions, use:
+
+```bash
+pnpm add -g vectraspace
+```
+
+From your vectraspace workspace root:
+
+```bash
+vectraspace init
+vectraspace start
+```
+
+Full install options are in [docs/INSTALL.md](docs/INSTALL.md).
+Primary docs are on the website: https://vectraspace.org/docs
 
 ## What The Scripts Do
 
-### `setup.sh`
+### `vectraspace setup`
 
-- installs Node dependencies for [app](app)
-- builds the app once to verify it compiles
-- creates `embedding-host/.venv` if needed
-- installs Python dependencies for the embedding host
-- validates `embedding-host/app.py`
+- copies [.env.example](.env.example) to [.env](.env) if needed
+- validates `docker compose`
+- generates media root bind mounts for containers from `MEDIA_ROOTS`
+- builds the app and embedding host images
 
-### `run.sh`
+### `vectraspace up`
 
-- starts the embedding host on `http://127.0.0.1:8000`
-- starts the app dev server in [app](app)
-- stops the embedding host when you exit the script
+- starts Qdrant, embedding host, and app containers with Docker Compose
+- waits for health checks and returns when stack is ready
+- keeps your terminal free (use `vectraspace logs` to follow logs)
+
+### `vectraspace start`
+
+- runs setup, starts all containers, waits for readiness, and opens the app in your browser
+- best default command for non-technical users
+
+A Node CLI for the common flows:
+
+- `vectraspace onboard`
+- `vectraspace setup`
+- `vectraspace init`
+- `vectraspace start`
+- `vectraspace up`
+- `vectraspace stop`
+- `vectraspace down`
+- `vectraspace logs`
+- `vectraspace ps`
+- `vectraspace doctor`
+- `vectraspace index <directory>`
+- `vectraspace search <query>`
 
 ## Requirements
 
-- `pnpm`
-- `python3.11`
-- Qdrant running locally
+- `docker`
+- Qdrant is started by Compose
 
-Example Qdrant container:
-
-```bash
-docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant
-```
+The compose file starts Qdrant for you.
 
 ## Environment
 
-Copy the values in [.env.example](.env.example) into your local [.env](.env) and adjust paths as needed.
+Create or update `app/.env` from `app/.env.example`, or run `vectraspace onboard` to configure it interactively.
 
 Recommended semantic search settings:
 
@@ -82,27 +111,22 @@ It returns normalized vectors in the format:
 
 ## Semantic Search Flow
 
-1. Run Qdrant.
-2. Run `./run.sh`.
-3. Set `EMBEDDING_REINDEX_CONCURRENCY` in [.env](.env) if you want more parallel reindexing.
-4. Use the Reindex button in the UI, or call `POST /api/search/reindex`.
-5. Search from the top bar in the app.
+1. Run `vectraspace start`.
+2. Set `EMBEDDING_REINDEX_CONCURRENCY` in [.env](.env) if you want more parallel reindexing.
+3. Index a directory: `vectraspace index /path/inside/your/media/root`.
+4. Search from terminal: `vectraspace search "your query"`.
+5. Use the Reindex button in the UI, or call `POST /api/search/reindex`.
 
 ## Manual Commands
 
 If you want to run things separately:
 
 ```bash
-cd app
-pnpm dev
+docker compose up -d qdrant embedding-host app
 ```
 
 ```bash
-cd embedding-host
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app:app --host 127.0.0.1 --port 8000
+docker compose logs -f --tail=100
 ```
 
 ## Troubleshooting

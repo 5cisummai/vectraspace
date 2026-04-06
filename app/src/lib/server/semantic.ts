@@ -30,6 +30,18 @@ interface QdrantScrollResponse {
 	};
 }
 
+interface QdrantCollectionInfoResponse {
+	result?: {
+		config?: {
+			params?: {
+				vectors?: {
+					size?: number;
+				};
+			};
+		};
+	};
+}
+
 interface ReindexSummary {
 	totalFiles: number;
 	indexed: number;
@@ -249,8 +261,43 @@ async function collectionExists(): Promise<boolean> {
 	return true;
 }
 
+async function collectionVectorSize(): Promise<number | null> {
+	if (!(await collectionExists())) return null;
+
+	const info = await qdrantRequest<QdrantCollectionInfoResponse>(`/collections/${collectionName()}`);
+	const size = info.result?.config?.params?.vectors?.size;
+	return typeof size === 'number' ? size : null;
+}
+
+async function recreateCollection(vectorSize: number): Promise<void> {
+	await qdrantRequest(`/collections/${collectionName()}`, {
+		method: 'DELETE'
+	});
+
+	await qdrantRequest(`/collections/${collectionName()}`, {
+		method: 'PUT',
+		body: JSON.stringify({
+			vectors: {
+				size: vectorSize,
+				distance: 'Cosine'
+			}
+		})
+	});
+}
+
 async function ensureCollection(vectorSize: number): Promise<void> {
-	if (await collectionExists()) return;
+	const existingSize = await collectionVectorSize();
+	if (existingSize !== null) {
+		if (existingSize === vectorSize) {
+			return;
+		}
+
+		console.warn(
+			`Qdrant collection vector size mismatch (${existingSize} != ${vectorSize}); recreating collection '${collectionName()}'`
+		);
+		await recreateCollection(vectorSize);
+		return;
+	}
 
 	await qdrantRequest(`/collections/${collectionName()}`, {
 		method: 'PUT',
