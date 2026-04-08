@@ -18,9 +18,11 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Separator } from '$lib/components/ui/separator';
 	import { Skeleton } from '$lib/components/ui/skeleton';
+	import AppSidebar from '$lib/components/app-sidebar.svelte';
 	import AppTopbar from '$lib/components/app-topbar.svelte';
 	import * as Breadcrumb from '$lib/components/ui/breadcrumb/index.js';
 	import * as ContextMenu from '$lib/components/ui/context-menu/index.js';
+	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 	import MediaIcon from '$lib/components/media-icon.svelte';
 	import { page } from '$app/stores';
 	type MediaType = 'video' | 'audio' | 'image' | 'document' | 'other';
@@ -485,9 +487,22 @@
 	});
 </script>
 
-<div class="min-h-screen bg-background text-foreground">
-	<AppTopbar>
+<Sidebar.Provider>
+	<AppSidebar
+		drives={drives}
+		entries={entries}
+		currentPath={currentPath}
+		selectedPaths={selectedPaths}
+		semanticQuery={semanticQuery}
+		isSemanticMode={isSemanticMode}
+		onBrowse={browse}
+	/>
+	<Sidebar.Inset>
+		<div class="min-h-screen bg-background text-foreground">
+	<AppTopbar class="border-b border-border/80 bg-background/90">
 		{#snippet left()}
+			<Sidebar.Trigger class="-ms-1" />
+			<Separator orientation="vertical" class="mx-1 h-5" />
 			<HardDrive class="h-5 w-5 text-primary" />
 			<span class="font-semibold tracking-tight">Vectraspace</span>
 			<Separator orientation="vertical" class="mx-1 h-5" />
@@ -918,4 +933,6 @@
 			</div>
 		{/if}
 	</main>
-</div>
+		</div>
+	</Sidebar.Inset>
+</Sidebar.Provider>
