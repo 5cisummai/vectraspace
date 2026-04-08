@@ -2,10 +2,13 @@ import { json, error } from '@sveltejs/kit';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { isPathInsideRoot, resolveSafePath } from '$lib/server/storage';
+import { db } from '$lib/server/db';
 import { env } from '$env/dynamic/private';
 import type { RequestHandler } from './$types';
 
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async ({ request, locals }) => {
+	if (!locals.user) throw error(401, 'Unauthorized');
+
 	const maxUploadSize = parseInt(env.MAX_UPLOAD_SIZE ?? '10737418240', 10);
 	const contentLength = request.headers.get('content-length');
 
@@ -46,6 +49,13 @@ export const POST: RequestHandler = async ({ request }) => {
 	await fs.writeFile(destPath, Buffer.from(arrayBuffer));
 
 	const relativePath = path.join(destination, safeName).split(path.sep).join('/');
+
+	// Record ownership (upsert in case the file is overwritten)
+	await db.uploadedFile.upsert({
+		where: { relativePath },
+		create: { relativePath, uploadedById: locals.user.id },
+		update: { uploadedById: locals.user.id, uploadedAt: new Date() }
+	});
 
 	return json({ success: true, name: safeName, relativePath });
 };

@@ -15,6 +15,7 @@
 	import { Separator } from '$lib/components/ui/separator';
 	import { Badge } from '$lib/components/ui/badge';
 	import * as Card from '$lib/components/ui/card';
+	import AppTopbar from '$lib/components/app-topbar.svelte';
 
 	interface Props {
 		data: { dest: string };
@@ -69,19 +70,21 @@
 </script>
 
 <div class="min-h-screen bg-background text-foreground">
-	<!-- Topbar -->
-	<header class="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur">
-		<div class="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3">
+	<AppTopbar>
+		{#snippet left()}
 			<Button variant="ghost" size="icon" class="h-8 w-8" onclick={goBack}>
 				<ArrowLeft class="h-4 w-4" />
 			</Button>
 			<Separator orientation="vertical" class="h-5" />
-			<span class="flex-1 font-medium">Upload files</span>
+		{/snippet}
+
+		{#snippet center()}
+			<span class="font-medium">Upload files</span>
 			{#if dest}
 				<Badge variant="outline" class="font-mono text-xs">→ {dest}</Badge>
 			{/if}
-		</div>
-	</header>
+		{/snippet}
+	</AppTopbar>
 
 	<main class="mx-auto max-w-3xl px-4 py-8 flex flex-col gap-6">
 

@@ -11,7 +11,6 @@
 		List,
 		AlertCircle,
 		Search,
-		RefreshCw,
 		X,
 		FolderPlus
 	} from '@lucide/svelte';
@@ -19,6 +18,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Separator } from '$lib/components/ui/separator';
 	import { Skeleton } from '$lib/components/ui/skeleton';
+	import AppTopbar from '$lib/components/app-topbar.svelte';
 	import * as Breadcrumb from '$lib/components/ui/breadcrumb/index.js';
 	import * as ContextMenu from '$lib/components/ui/context-menu/index.js';
 	import MediaIcon from '$lib/components/media-icon.svelte';
@@ -68,7 +68,6 @@
 	let semanticResults = $state<Entry[]>([]);
 	let semanticLoading = $state(false);
 	let semanticError = $state<string | null>(null);
-	let reindexing = $state(false);
 	let reindexMessage = $state<string | null>(null);
 	let selectedPaths = $state<string[]>([]);
 	let selectionAnchorPath = $state<string | null>(null);
@@ -105,7 +104,10 @@
 		selectedPaths = [];
 		selectionAnchorPath = null;
 		try {
-			const res = await fetch(`/api/browse${path ? '/' + path : ''}`);
+			const token = localStorage.getItem('token');
+			const res = await fetch(`/api/browse${path ? '/' + path : ''}`, {
+				headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+			});
 			if (!res.ok) throw new Error(await res.text());
 			entries = await res.json();
 		} catch (e) {
@@ -117,7 +119,10 @@
 
 	async function loadDrives() {
 		try {
-			const res = await fetch('/api/storage');
+			const token = localStorage.getItem('token');
+			const res = await fetch('/api/storage', {
+				headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+			});
 			if (!res.ok) return;
 			const data = (await res.json()) as DriveInfo[];
 			drives = data.filter((drive) => drive.available);
@@ -173,8 +178,10 @@
 		semanticError = null;
 
 		try {
+			const token = localStorage.getItem('token');
 			const res = await fetch(`/api/search?${params.join('&')}`, {
-				signal: controller.signal
+				signal: controller.signal,
+				headers: token ? { 'Authorization': `Bearer ${token}` } : {}
 			});
 			if (!res.ok) throw new Error(await res.text());
 			const body = (await res.json()) as SearchResponse;
@@ -313,7 +320,11 @@
 	}
 
 	async function deletePath(relativePath: string) {
-		const res = await fetch(`/api/delete/${encodeURI(relativePath)}`, { method: 'DELETE' });
+		const token = localStorage.getItem('token');
+		const res = await fetch(`/api/delete/${encodeURI(relativePath)}`, {
+			method: 'DELETE',
+			headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+		});
 		if (!res.ok) throw new Error(await res.text());
 	}
 
@@ -393,14 +404,19 @@
 		const name = window.prompt('New folder name:');
 		if (!name || !name.trim()) return;
 		const folderName = name.trim();
-		if (/[\/\\]/.test(folderName)) {
+
+		if (/[/\\]/.test(folderName)) {
 			window.alert('Folder name cannot contain slashes.');
 			return;
 		}
 		creatingFolder = true;
 		const newPath = [currentPath, folderName].filter(Boolean).join('/');
 		try {
-			const res = await fetch(`/api/mkdir/${encodeURI(newPath)}`, { method: 'POST' });
+			const token = localStorage.getItem('token');
+			const res = await fetch(`/api/mkdir/${encodeURI(newPath)}`, {
+				method: 'POST',
+				headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+			});
 			if (!res.ok) throw new Error(await res.text());
 			await browse(currentPath);
 		} catch (e) {
@@ -410,30 +426,6 @@
 		}
 	}
 
-	async function reindexSemantic() {
-		reindexing = true;
-		reindexMessage = null;
-		try {
-			const res = await fetch('/api/search/reindex', {
-				method: 'POST',
-			});
-			if (!res.ok) throw new Error(await res.text());
-			const body = (await res.json()) as {
-				summary?: { indexed?: number; deleted?: number; skipped?: number };
-			};
-			const indexed = body.summary?.indexed ?? 0;
-			const deleted = body.summary?.deleted ?? 0;
-			const skipped = body.summary?.skipped ?? 0;
-			reindexMessage = `Reindex complete: ${indexed} indexed, ${deleted} deleted, ${skipped} skipped.`;
-			if (isSemanticMode) {
-				void runSemanticSearch();
-			}
-		} catch (e) {
-			reindexMessage = e instanceof Error ? e.message : 'Reindex failed';
-		} finally {
-			reindexing = false;
-		}
-	}
 
 	function openEntry(entry: Entry) {
 		if (entry.type === 'directory') {
@@ -494,16 +486,15 @@
 </script>
 
 <div class="min-h-screen bg-background text-foreground">
-	<!-- Topbar -->
-	<header class="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur">
-		<div class="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3">
+	<AppTopbar>
+		{#snippet left()}
 			<HardDrive class="h-5 w-5 text-primary" />
 			<span class="font-semibold tracking-tight">Vectraspace</span>
-
 			<Separator orientation="vertical" class="mx-1 h-5" />
+		{/snippet}
 
-			<!-- Breadcrumbs -->
-			<Breadcrumb.Root class="min-w-0 flex-1">
+		{#snippet center()}
+			<Breadcrumb.Root class="min-w-0">
 				<Breadcrumb.List>
 					<Breadcrumb.Item>
 						<Breadcrumb.Link
@@ -530,53 +521,52 @@
 					{/each}
 				</Breadcrumb.List>
 			</Breadcrumb.Root>
+		{/snippet}
 
-			<!-- Actions -->
-			<div class="flex items-center gap-2">
-				{#if canCreateFolder}
-					<Button size="sm" variant="outline" onclick={createFolder} disabled={creatingFolder}>
-						<FolderPlus class="mr-2 h-3.5 w-3.5" />
-						New Folder
-					</Button>
-				{/if}
-				<Button size="sm" onclick={() => goto(resolve(`/upload?dest=${currentPath}`))}>
-					<Upload class="mr-2 h-3.5 w-3.5" />
-					Upload
+		{#snippet right()}
+			{#if canCreateFolder}
+				<Button size="sm" variant="outline" onclick={createFolder} disabled={creatingFolder}>
+					<FolderPlus class="mr-2 h-3.5 w-3.5" />
+					New Folder
+				</Button>
+			{/if}
+			<Button size="sm" onclick={() => goto(resolve(`/upload?dest=${currentPath}`))}>
+				<Upload class="mr-2 h-3.5 w-3.5" />
+				Upload
+			</Button>
+			<Separator orientation="vertical" class="h-5" />
+			<div class="flex rounded-md border border-border">
+				<Button
+					variant={viewMode === 'grid' ? 'secondary' : 'ghost'}
+					size="icon"
+					class="h-8 w-8 rounded-r-none"
+					onclick={() => (viewMode = 'grid')}
+				>
+					<Grid class="h-4 w-4" />
+				</Button>
+				<Button
+					variant={viewMode === 'list' ? 'secondary' : 'ghost'}
+					size="icon"
+					class="h-8 w-8 rounded-l-none"
+					onclick={() => (viewMode = 'list')}
+				>
+					<List class="h-4 w-4" />
 				</Button>
 				<Separator orientation="vertical" class="h-5" />
-				<div class="flex rounded-md border border-border">
-					<Button
-						variant={viewMode === 'grid' ? 'secondary' : 'ghost'}
-						size="icon"
-						class="h-8 w-8 rounded-r-none"
-						onclick={() => (viewMode = 'grid')}
-					>
-						<Grid class="h-4 w-4" />
-					</Button>
-					<Button
-						variant={viewMode === 'list' ? 'secondary' : 'ghost'}
-						size="icon"
-						class="h-8 w-8 rounded-l-none"
-						onclick={() => (viewMode = 'list')}
-					>
-						<List class="h-4 w-4" />
-					</Button>
-					<Separator orientation="vertical" class="h-5" />
-					<Button
-						variant="ghost"
-						size="icon"
-						class="h-8 w-8"
-						onclick={() => goto(resolve('/settings'))}
-					>
-						<Server class="h-4 w-4" />
-					</Button>
-				</div>
+				<Button
+					variant="ghost"
+					size="icon"
+					class="h-8 w-8"
+					onclick={() => goto(resolve('/settings'))}
+				>
+					<Server class="h-4 w-4" />
+				</Button>
 			</div>
-		</div>
-	</header>
+		{/snippet}
+	</AppTopbar>
 
 	<main class="mx-auto max-w-7xl px-4 py-6">
-		<div class="mb-4 rounded-lg border border-border bg-card p-3">
+		<div class="mb-4">
 			<div class="flex flex-col gap-3 md:flex-row md:items-center">
 				<div class="relative flex-1">
 					<Search class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />

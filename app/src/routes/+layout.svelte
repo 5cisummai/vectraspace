@@ -6,6 +6,7 @@
 	import { Upload, RefreshCw, CheckCircle, AlertCircle, X } from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { uploadManager } from '$lib/upload-manager';
+	import { ModeWatcher } from "mode-watcher";
 
 	let { children } = $props();
 
@@ -17,6 +18,7 @@
 </script>
 
 <svelte:head><link rel="icon" href={favicon} /></svelte:head>
+<ModeWatcher />
 {@render children()}
 
 {#if $uploadManager.items.length > 0 && ($uploadManager.batchPhase !== 'idle' || $uploadManager.batchMessage)}

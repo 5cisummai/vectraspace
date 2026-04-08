@@ -51,7 +51,7 @@ The recommended model is a multimodal embedding model such as `Qwen/Qwen3-VL-Emb
 Copy `.env.example` values into your local `.env` and set:
 
 - `MEDIA_ROOTS`
-- `QDRANT_URL` (and optional `QDRANT_API_KEY`)
+- `QDRANT_URL` and one of `QDRANT_API_KEY`, `QDRANT_BEARER_TOKEN`, or `QDRANT_AUTH_TOKEN`
 - `EMBEDDING_PROVIDER=multimodal`
 - `MULTIMODAL_EMBEDDING_URL`
 - `MULTIMODAL_EMBEDDING_MODEL` (default shown in the template)
@@ -74,6 +74,9 @@ docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant
 ```
 
 If you already run Qdrant locally, point `QDRANT_URL` to that instance.
+
+For secured Qdrant deployments, set either `QDRANT_API_KEY` or `QDRANT_BEARER_TOKEN`.
+Both are sent with requests; the bearer token can be provided with or without the `Bearer ` prefix.
 
 Suggested local multimodal service contract:
 

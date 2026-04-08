@@ -5,6 +5,7 @@
 	import * as Card from '$lib/components/ui/card';
 	import { Separator } from '$lib/components/ui/separator';
 	import { Badge } from '$lib/components/ui/badge';
+	import AppTopbar from '$lib/components/app-topbar.svelte';
 
 	interface Props {
 		data: { path: string };
@@ -42,23 +43,28 @@
 </script>
 
 <div class="min-h-screen bg-background text-foreground">
-	<!-- Topbar -->
-	<header class="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur">
-		<div class="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3">
+	<AppTopbar>
+		{#snippet left()}
 			<Button variant="ghost" size="icon" class="h-8 w-8" onclick={goBack}>
 				<ArrowLeft class="h-4 w-4" />
 			</Button>
 			<Separator orientation="vertical" class="h-5" />
-			<span class="min-w-0 flex-1 truncate font-medium">{formatName(filename)}</span>
+		{/snippet}
+
+		{#snippet center()}
+			<span class="min-w-0 truncate font-medium">{formatName(filename)}</span>
 			<Badge variant="outline" class="shrink-0 uppercase">{ext}</Badge>
+		{/snippet}
+
+		{#snippet right()}
 			<a href={streamUrl} download={filename}>
 				<Button variant="outline" size="sm">
 					<Download class="mr-2 h-3.5 w-3.5" />
 					Download
 				</Button>
 			</a>
-		</div>
-	</header>
+		{/snippet}
+	</AppTopbar>
 
 	<main class="mx-auto max-w-7xl px-4 py-8">
 		<!-- Video player -->

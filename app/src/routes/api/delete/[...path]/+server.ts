@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { resolveSafePath } from '$lib/server/storage';
 import { deleteSemanticEntryByRelativePath } from '$lib/server/semantic';
+import { db } from '$lib/server/db';
 import type { RequestHandler } from './$types';
 
 async function collectNestedFilePaths(fullPath: string, relativePath: string): Promise<string[]> {
@@ -22,7 +23,9 @@ async function collectNestedFilePaths(fullPath: string, relativePath: string): P
 	return nestedPaths.flat();
 }
 
-export const DELETE: RequestHandler = async ({ params }) => {
+export const DELETE: RequestHandler = async ({ params, locals }) => {
+	if (!locals.user) throw error(401, 'Unauthorized');
+
 	const relativePath = params.path ?? '';
 	const resolved = resolveSafePath(relativePath);
 	if (!resolved) throw error(400, 'Invalid path');
@@ -45,6 +48,25 @@ export const DELETE: RequestHandler = async ({ params }) => {
 		throw error(400, 'Only files and folders can be deleted');
 	}
 
+	const isAdmin = locals.user.role === 'ADMIN';
+
+	if (!isAdmin) {
+		if (stat.isDirectory()) {
+			// Non-admins cannot delete directories
+			throw error(403, 'Only admins can delete directories');
+		}
+
+		// Check ownership for single-file deletes
+		const owned = await db.uploadedFile.findUnique({
+			where: { relativePath },
+			select: { uploadedById: true }
+		});
+
+		if (!owned || owned.uploadedById !== locals.user.id) {
+			throw error(403, 'You can only delete files you uploaded');
+		}
+	}
+
 	const semanticPaths = await collectNestedFilePaths(resolved.fullPath, relativePath);
 
 	try {
@@ -58,6 +80,13 @@ export const DELETE: RequestHandler = async ({ params }) => {
 			throw error(404, 'Path not found');
 		}
 		throw err;
+	}
+
+	// Clean up ownership records
+	if (semanticPaths.length > 0) {
+		await db.uploadedFile.deleteMany({
+			where: { relativePath: { in: semanticPaths } }
+		});
 	}
 
 	const semanticDeletes = await Promise.allSettled(
