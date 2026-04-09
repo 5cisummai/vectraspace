@@ -1,5 +1,5 @@
 import { json, error } from '@sveltejs/kit';
-import { listDirectory } from '$lib/server/storage';
+import { listDirectory } from '$lib/server/services/storage';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ params }) => {

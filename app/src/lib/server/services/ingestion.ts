@@ -1,0 +1,231 @@
+import fs from 'node:fs/promises';
+import type { Dirent } from 'node:fs';
+import path from 'node:path';
+import { env } from '$env/dynamic/private';
+import { brain, type BrainPoint } from '$lib/server/services/vectordb';
+import { createPointId, embedText } from '$lib/server/services/embedding';
+import {
+	getMediaInfo,
+	getMediaRoots,
+	readFileContent,
+	resolveSafePath,
+	type MediaType
+} from '$lib/server/services/storage';
+
+const CHUNK_SIZE = 1200;
+const CHUNK_OVERLAP = 200;
+const UPSERT_BATCH_SIZE = 32;
+
+interface IngestCounters {
+	filesScanned: number;
+	filesIndexed: number;
+	filesSkipped: number;
+	chunksIndexed: number;
+	errors: Array<{ path: string; error: string }>;
+}
+
+interface IngestFileResult {
+	path: string;
+	status: 'indexed' | 'skipped';
+	chunksIndexed: number;
+	reason?: string;
+}
+
+export interface IngestSummary extends IngestCounters {
+	collection: string;
+}
+
+function collectionName(): string {
+	return env.QDRANT_INGEST_COLLECTION ?? 'media_ingest';
+}
+
+function chunkText(text: string, size = CHUNK_SIZE, overlap = CHUNK_OVERLAP): string[] {
+	const normalized = text.replace(/\r\n/g, '\n').trim();
+	if (!normalized) return [];
+
+	if (normalized.length <= size) {
+		return [normalized];
+	}
+
+	const chunks: string[] = [];
+	let start = 0;
+
+	while (start < normalized.length) {
+		const end = Math.min(start + size, normalized.length);
+		chunks.push(normalized.slice(start, end));
+		if (end >= normalized.length) break;
+		start = Math.max(0, end - overlap);
+	}
+
+	return chunks;
+}
+
+async function walkDirectory(relativePath: string): Promise<string[]> {
+	const resolved = resolveSafePath(relativePath);
+	if (!resolved) return [];
+
+	let dirents: Dirent[];
+	try {
+		dirents = await fs.readdir(resolved.fullPath, { withFileTypes: true });
+	} catch {
+		return [];
+	}
+
+	const files: string[] = [];
+
+	for (const dirent of dirents) {
+		if (dirent.name.startsWith('.')) continue;
+
+		const child = path.posix.join(relativePath, dirent.name);
+		if (dirent.isDirectory()) {
+			files.push(...(await walkDirectory(child)));
+			continue;
+		}
+
+		if (!dirent.isFile()) continue;
+		files.push(child);
+	}
+
+	return files;
+}
+
+async function ingestOneFile(relativePath: string): Promise<IngestFileResult> {
+	const resolved = resolveSafePath(relativePath);
+	if (!resolved) {
+		return { path: relativePath, status: 'skipped', chunksIndexed: 0, reason: 'Invalid path' };
+	}
+
+	const stat = await fs.stat(resolved.fullPath);
+	if (!stat.isFile()) {
+		return { path: relativePath, status: 'skipped', chunksIndexed: 0, reason: 'Not a file' };
+	}
+
+	const { mediaType, mimeType } = getMediaInfo(resolved.fullPath);
+	const content = await readFileContent(resolved.fullPath, mediaType);
+	if (!content) {
+		return {
+			path: relativePath,
+			status: 'skipped',
+			chunksIndexed: 0,
+			reason: `Unsupported or empty content for media type: ${mediaType}`
+		};
+	}
+
+	const chunks = chunkText(content);
+	if (chunks.length === 0) {
+		return { path: relativePath, status: 'skipped', chunksIndexed: 0, reason: 'No text chunks produced' };
+	}
+
+	const points: BrainPoint[] = [];
+	for (let index = 0; index < chunks.length; index++) {
+		const chunk = chunks[index];
+		const { vector, provider } = await embedText(chunk);
+		const pointId = createPointId(`${relativePath}#${index}`);
+		const payload: {
+			path: string;
+			chunk: string;
+			chunkIndex: number;
+			chunkCount: number;
+			filename: string;
+			mediaType: MediaType;
+			mimeType?: string;
+			size: number;
+			modified: string;
+			rootIndex: number;
+			provider: string;
+		} = {
+			path: relativePath,
+			chunk,
+			chunkIndex: index,
+			chunkCount: chunks.length,
+			filename: path.basename(resolved.fullPath),
+			mediaType,
+			size: stat.size,
+			modified: stat.mtime.toISOString(),
+			rootIndex: Number.parseInt(relativePath.split('/')[0] ?? '-1', 10),
+			provider
+		};
+		if (mimeType) payload.mimeType = mimeType;
+
+		points.push({ id: pointId, vector, payload });
+	}
+
+	await brain.ensureCollection(collectionName(), points[0].vector.length);
+
+	for (let i = 0; i < points.length; i += UPSERT_BATCH_SIZE) {
+		await brain.upsertPoints(collectionName(), points.slice(i, i + UPSERT_BATCH_SIZE));
+	}
+
+	return { path: relativePath, status: 'indexed', chunksIndexed: points.length };
+}
+
+export async function ingestFileByRelativePath(relativePath: string): Promise<IngestSummary> {
+	const counters: IngestCounters = {
+		filesScanned: 1,
+		filesIndexed: 0,
+		filesSkipped: 0,
+		chunksIndexed: 0,
+		errors: []
+	};
+
+	try {
+		const result = await ingestOneFile(relativePath);
+		if (result.status === 'indexed') {
+			counters.filesIndexed++;
+			counters.chunksIndexed += result.chunksIndexed;
+		} else {
+			counters.filesSkipped++;
+		}
+	} catch (err) {
+		counters.filesSkipped++;
+		counters.errors.push({
+			path: relativePath,
+			error: err instanceof Error ? err.message : 'Unknown ingestion error'
+		});
+	}
+
+	return {
+		collection: collectionName(),
+		...counters
+	};
+}
+
+export async function ingestDirectoryByRootIndex(rootIndex: number): Promise<IngestSummary> {
+	const roots = getMediaRoots();
+	if (!Number.isInteger(rootIndex) || rootIndex < 0 || rootIndex >= roots.length) {
+		throw new Error('Invalid rootIndex');
+	}
+
+	const base = `${rootIndex}`;
+	const allFiles = await walkDirectory(base);
+	const counters: IngestCounters = {
+		filesScanned: allFiles.length,
+		filesIndexed: 0,
+		filesSkipped: 0,
+		chunksIndexed: 0,
+		errors: []
+	};
+
+	for (const filePath of allFiles) {
+		try {
+			const result = await ingestOneFile(filePath);
+			if (result.status === 'indexed') {
+				counters.filesIndexed++;
+				counters.chunksIndexed += result.chunksIndexed;
+			} else {
+				counters.filesSkipped++;
+			}
+		} catch (err) {
+			counters.filesSkipped++;
+			counters.errors.push({
+				path: filePath,
+				error: err instanceof Error ? err.message : 'Unknown ingestion error'
+			});
+		}
+	}
+
+	return {
+		collection: collectionName(),
+		...counters
+	};
+}

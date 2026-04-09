@@ -12,7 +12,14 @@ declare global {
 				role: UserRole;
 			};
 		}
-		// interface PageData {}
+		interface PageData {
+			fileTree?: unknown[];
+			user?: {
+				id: string;
+				username: string;
+				role: UserRole;
+			};
+		}
 		// interface PageState {}
 		// interface Platform {}
 	}

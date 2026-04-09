@@ -1,6 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import fs from 'node:fs/promises';
-import { getMediaRoots } from '$lib/server/storage';
+import { getMediaRoots } from '$lib/server/services/storage';
 import type { RequestHandler } from './$types';
 
 export interface DriveInfo {

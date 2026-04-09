@@ -1,8 +1,16 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
 import { env } from '$env/dynamic/private';
-import { getMediaInfo, getMediaRoots, resolveSafePath, type MediaEntry, type MediaType } from '$lib/server/storage';
+import { brain, type BrainPoint } from '$lib/server/services/vectordb';
+import { embedText, embedImage, createPointId } from '$lib/server/services/embedding';
+import {
+	getMediaInfo,
+	getMediaRoots,
+	listDirectory,
+	resolveSafePath,
+	type MediaEntry,
+	type MediaType
+} from '$lib/server/services/storage';
 
 export interface SearchResult {
 	id: string;
@@ -17,31 +25,6 @@ export interface SearchResult {
 	rootIndex: number;
 }
 
-interface QdrantPoint {
-	id: string;
-	vector: number[];
-	payload: Record<string, unknown>;
-}
-
-interface QdrantScrollResponse {
-	result?: {
-		points?: Array<{ id: string | number }>;
-		next_page_offset?: string | number | null;
-	};
-}
-
-interface QdrantCollectionInfoResponse {
-	result?: {
-		config?: {
-			params?: {
-				vectors?: {
-					size?: number;
-				};
-			};
-		};
-	};
-}
-
 interface ReindexSummary {
 	totalFiles: number;
 	indexed: number;
@@ -52,23 +35,6 @@ interface ReindexSummary {
 
 const DEFAULT_REINDEX_CONCURRENCY = 1;
 const MAX_REINDEX_CONCURRENCY = 8;
-
-function normalizeVector(vector: number[]): number[] {
-	let norm = 0;
-	for (const value of vector) norm += value * value;
-	norm = Math.sqrt(norm);
-	if (norm === 0) return vector;
-	return vector.map((value) => value / norm);
-}
-
-function createPointId(relativePath: string): string {
-	const digest = createHash('sha1').update(relativePath).digest();
-	const bytes = Buffer.from(digest.subarray(0, 16));
-	bytes[6] = (bytes[6] & 0x0f) | 0x50;
-	bytes[8] = (bytes[8] & 0x3f) | 0x80;
-	const hex = bytes.toString('hex');
-	return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
-}
 
 function buildMetadataText(entry: MediaEntry): string {
 	const ext = path.extname(entry.name).slice(1).toLowerCase();
@@ -83,15 +49,6 @@ function buildMetadataText(entry: MediaEntry): string {
 	return parts.join(' | ');
 }
 
-type EmbeddingProvider = 'multimodal' | 'ollama' | 'openai';
-
-function embeddingProvider(): EmbeddingProvider {
-	const provider = (env.EMBEDDING_PROVIDER ?? (env.MULTIMODAL_EMBEDDING_URL ? 'multimodal' : 'ollama')).toLowerCase();
-	if (provider === 'openai') return 'openai';
-	if (provider === 'multimodal' || provider === 'qwen-vl') return 'multimodal';
-	return 'ollama';
-}
-
 function resolveReindexConcurrency(): number {
 	const candidate = Number.parseInt(env.EMBEDDING_REINDEX_CONCURRENCY ?? String(DEFAULT_REINDEX_CONCURRENCY), 10);
 
@@ -102,261 +59,175 @@ function resolveReindexConcurrency(): number {
 	return Math.min(Math.floor(candidate), MAX_REINDEX_CONCURRENCY);
 }
 
-async function embedWithMultimodal(input: {
-	type: 'text' | 'image';
-	text?: string;
-	imageBase64?: string;
-	filename?: string;
-}): Promise<number[]> {
-	const endpoint = env.MULTIMODAL_EMBEDDING_URL;
-	if (!endpoint) {
-		throw new Error('MULTIMODAL_EMBEDDING_URL is required when EMBEDDING_PROVIDER=multimodal');
-	}
-
-	const model = env.MULTIMODAL_EMBEDDING_MODEL ?? 'Qwen/Qwen3-VL-Embedding-2B';
-	const headers: Record<string, string> = {
-		'Content-Type': 'application/json'
-	};
-	if (env.MULTIMODAL_EMBEDDING_API_KEY) {
-		headers.Authorization = `Bearer ${env.MULTIMODAL_EMBEDDING_API_KEY}`;
-	}
-
-	const response = await fetch(endpoint, {
-		method: 'POST',
-		headers,
-		body: JSON.stringify({
-			model,
-			...input
-		})
-	});
-
-	if (!response.ok) {
-		throw new Error(`Multimodal embedding request failed: ${response.status} ${response.statusText}`);
-	}
-
-	const body = (await response.json()) as { embedding?: number[] };
-	if (!Array.isArray(body.embedding)) {
-		throw new Error('Multimodal embedding response did not include an embedding vector');
-	}
-
-	return normalizeVector(body.embedding);
-}
-
-async function embedTextWithOllama(input: string): Promise<number[]> {
-	const baseUrl = env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434';
-	const model = env.OLLAMA_EMBED_MODEL ?? env.OLLAMA_MODEL ?? 'nomic-embed-text';
-
-	const response = await fetch(`${baseUrl}/api/embeddings`, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ model, prompt: input })
-	});
-
-	if (!response.ok) {
-		throw new Error(`Ollama embedding request failed: ${response.status} ${response.statusText}`);
-	}
-
-	const body = (await response.json()) as { embedding?: number[] };
-	if (!Array.isArray(body.embedding)) {
-		throw new Error('Ollama embedding response did not include an embedding vector');
-	}
-
-	return normalizeVector(body.embedding);
-}
-
-async function embedTextWithOpenAICompatible(input: string): Promise<number[]> {
-	const baseUrl = env.OPENAI_BASE_URL ?? 'http://127.0.0.1:1234/v1';
-	const model = env.OPENAI_EMBED_MODEL ?? env.OPENAI_MODEL;
-	if (!model) {
-		throw new Error('OPENAI_EMBED_MODEL (or OPENAI_MODEL) is required when EMBEDDING_PROVIDER=openai');
-	}
-
-	const headers: Record<string, string> = {
-		'Content-Type': 'application/json'
-	};
-	if (env.OPENAI_API_KEY) headers.Authorization = `Bearer ${env.OPENAI_API_KEY}`;
-
-	const response = await fetch(`${baseUrl}/embeddings`, {
-		method: 'POST',
-		headers,
-		body: JSON.stringify({
-			model,
-			input
-		})
-	});
-
-	if (!response.ok) {
-		throw new Error(`OpenAI-compatible embedding request failed: ${response.status} ${response.statusText}`);
-	}
-
-	const body = (await response.json()) as {
-		data?: Array<{ embedding?: number[] }>;
-	};
-
-	const embedding = body.data?.[0]?.embedding;
-	if (!Array.isArray(embedding)) {
-		throw new Error('OpenAI-compatible embedding response did not include an embedding vector');
-	}
-
-	return normalizeVector(embedding);
-}
-
-async function embedText(input: string): Promise<number[]> {
-	const provider = embeddingProvider();
-	if (provider === 'multimodal') {
-		return embedWithMultimodal({ type: 'text', text: input });
-	}
-	if (provider === 'openai') {
-		return embedTextWithOpenAICompatible(input);
-	}
-	return embedTextWithOllama(input);
-}
-
-async function embedImageWithMultimodal(filePath: string): Promise<number[] | null> {
-	const provider = embeddingProvider();
-	if (provider !== 'multimodal') return null;
-
-	const bytes = await fs.readFile(filePath);
-	return embedWithMultimodal({
-		type: 'image',
-		imageBase64: bytes.toString('base64'),
-		filename: path.basename(filePath)
-	});
-}
-
-async function qdrantRequest<T>(requestPath: string, init?: RequestInit): Promise<T> {
-	const baseUrl = env.QDRANT_URL ?? 'http://127.0.0.1:6333';
-	const headers = new Headers(init?.headers ?? {});
-	headers.set('Content-Type', 'application/json');
-	if (env.QDRANT_API_KEY) headers.set('api-key', env.QDRANT_API_KEY);
-
-	const response = await fetch(`${baseUrl}${requestPath}`, {
-		...init,
-		headers
-	});
-
-	if (!response.ok) {
-		const message = await response.text();
-		throw new Error(`Qdrant request failed (${response.status}): ${message}`);
-	}
-
-	return (await response.json()) as T;
-}
-
 function collectionName(): string {
 	return env.QDRANT_COLLECTION ?? 'media_semantic';
 }
 
-async function collectionExists(): Promise<boolean> {
-	const baseUrl = env.QDRANT_URL ?? 'http://127.0.0.1:6333';
-	const headers = new Headers();
-	if (env.QDRANT_API_KEY) headers.set('api-key', env.QDRANT_API_KEY);
-
-	const response = await fetch(`${baseUrl}/collections/${collectionName()}`, { headers });
-	if (response.status === 404) return false;
-	if (!response.ok) {
-		const message = await response.text();
-		throw new Error(`Qdrant request failed (${response.status}): ${message}`);
-	}
-	return true;
+/** Qdrant collection populated by `/api/ingest/*` (text chunks + embeddings). */
+export function ingestCollectionName(): string {
+	return env.QDRANT_INGEST_COLLECTION ?? 'media_ingest';
 }
 
-async function collectionVectorSize(): Promise<number | null> {
-	if (!(await collectionExists())) return null;
-
-	const info = await qdrantRequest<QdrantCollectionInfoResponse>(`/collections/${collectionName()}`);
-	const size = info.result?.config?.params?.vectors?.size;
-	return typeof size === 'number' ? size : null;
+/** Chunk-level hit from ingest collection (used for RAG in chat). */
+export interface IngestChunkHit {
+	id: string;
+	score: number;
+	path: string;
+	chunk: string;
+	filename: string;
+	chunkIndex: number;
+	chunkCount?: number;
+	mediaType: MediaType;
+	rootIndex: number;
 }
 
-async function recreateCollection(vectorSize: number): Promise<void> {
-	await qdrantRequest(`/collections/${collectionName()}`, {
-		method: 'DELETE'
-	});
-
-	await qdrantRequest(`/collections/${collectionName()}`, {
-		method: 'PUT',
-		body: JSON.stringify({
-			vectors: {
-				size: vectorSize,
-				distance: 'Cosine'
+/**
+ * Heuristic: "what is in my flowers directory" → "flowers".
+ * Helps narrow vector hits to paths containing that segment.
+ */
+export function extractDirectoryHint(question: string): string | null {
+	const q = question.trim();
+	const patterns = [
+		/\b(?:in|inside|under)\s+(?:my|the)\s+(.+?)\s+(?:directory|folder)\b/i,
+		/\bwhat(?:'s|s| is)\s+(?:in|inside)\s+(?:my|the)\s+(.+?)\s+(?:directory|folder)\b/i,
+		/\b(?:list|show)\s+(?:what(?:'s|s| is)\s+)?(?:in|inside)\s+(?:my|the)\s+(.+?)\s+(?:directory|folder)\b/i
+	];
+	for (const p of patterns) {
+		const m = q.match(p);
+		if (m?.[1]) {
+			const raw = m[1].trim().replace(/^["']|["']$/g, '');
+			if (raw.length > 0 && raw.length < 200) {
+				return raw.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
 			}
-		})
-	});
+		}
+	}
+	return null;
 }
 
-async function ensureCollection(vectorSize: number): Promise<void> {
-	const existingSize = await collectionVectorSize();
-	if (existingSize !== null) {
-		if (existingSize === vectorSize) {
-			return;
+/**
+ * When vector search finds nothing, answer "what's in my X folder" from the filesystem
+ * (works for image-only folders that never produced ingest chunks).
+ */
+export async function buildDirectoryListingContext(
+	directoryHint: string,
+	rootIndex?: number
+): Promise<string | null> {
+	const clean = directoryHint
+		.trim()
+		.replace(/^[/\\]+/, '')
+		.replace(/\\/g, '/');
+	if (!clean) return null;
+
+	const roots = getMediaRoots();
+	const indices =
+		typeof rootIndex === 'number'
+			? [rootIndex]
+			: Array.from({ length: roots.length }, (_, i) => i);
+
+	const parts: string[] = [];
+
+	for (const ri of indices) {
+		if (ri < 0 || ri >= roots.length) continue;
+		const rel = `${ri}/${clean}`;
+
+		const resolved = resolveSafePath(rel);
+		if (!resolved) continue;
+
+		try {
+			const st = await fs.stat(resolved.fullPath);
+			if (!st.isDirectory()) continue;
+		} catch {
+			continue;
 		}
 
-		console.warn(
-			`Qdrant collection vector size mismatch (${existingSize} != ${vectorSize}); recreating collection '${collectionName()}'`
+		const entries = await listDirectory(rel);
+		if (entries.length === 0) {
+			parts.push(`Directory ${rel}: (empty)`);
+			continue;
+		}
+
+		const lines = entries.map((e) =>
+			e.type === 'directory' ? `[folder] ${e.name}/` : `[file] ${e.name}`
 		);
-		await recreateCollection(vectorSize);
-		return;
+		parts.push(`Directory ${rel}:\n${lines.join('\n')}`);
 	}
 
-	await qdrantRequest(`/collections/${collectionName()}`, {
-		method: 'PUT',
-		body: JSON.stringify({
-			vectors: {
-				size: vectorSize,
-				distance: 'Cosine'
-			}
+	return parts.length > 0 ? parts.join('\n\n') : null;
+}
+
+/**
+ * Semantic search over ingested file chunks (actual text), not filename metadata.
+ */
+export async function searchIngestChunks(
+	query: string,
+	options?: {
+		rootIndex?: number;
+		/** If set, keep hits whose path or filename contains this substring (case-insensitive). */
+		pathContains?: string | null;
+		limit?: number;
+		/** Internal prefetch before path filtering. */
+		prefetchLimit?: number;
+		minScore?: number;
+	}
+): Promise<IngestChunkHit[]> {
+	const vector = (await embedText(query)).vector;
+	const limit = Math.max(1, Math.min(options?.limit ?? 16, 48));
+	const prefetch = Math.min(options?.prefetchLimit ?? (options?.pathContains ? 80 : 40), 128);
+	const minScore =
+		typeof options?.minScore === 'number'
+			? options.minScore
+			: Number.parseFloat(env.BRAIN_INGEST_MIN_SCORE ?? '0.2');
+	const threshold = Number.isFinite(minScore) ? minScore : 0.2;
+
+	const must: Array<Record<string, unknown>> = [];
+	if (typeof options?.rootIndex === 'number') {
+		must.push({ key: 'rootIndex', match: { value: options.rootIndex } });
+	}
+
+	let rows;
+	try {
+		rows = await brain.search(ingestCollectionName(), {
+			vector,
+			limit: prefetch,
+			filter: must.length > 0 ? { must } : undefined
+		});
+	} catch {
+		return [];
+	}
+
+	let hits = rows
+		.filter((row) => typeof row.score === 'number' && row.score >= threshold)
+		.map((row) => {
+			const payload = row.payload ?? {};
+			const chunk = String(payload.chunk ?? '');
+			return {
+				id: String(row.id),
+				score: row.score,
+				path: String(payload.path ?? ''),
+				chunk,
+				filename: String(payload.filename ?? ''),
+				chunkIndex: typeof payload.chunkIndex === 'number' ? payload.chunkIndex : 0,
+				chunkCount: typeof payload.chunkCount === 'number' ? payload.chunkCount : undefined,
+				mediaType: (payload.mediaType as MediaType) ?? 'other',
+				rootIndex: typeof payload.rootIndex === 'number' ? payload.rootIndex : -1
+			};
 		})
-	});
-}
+		.filter((h) => h.path.length > 0 && h.chunk.length > 0);
 
-async function upsertPoints(points: QdrantPoint[]): Promise<void> {
-	if (points.length === 0) return;
-	await qdrantRequest(`/collections/${collectionName()}/points?wait=true`, {
-		method: 'PUT',
-		body: JSON.stringify({ points })
-	});
-}
-
-async function scrollPointIds(): Promise<Set<string>> {
-	const ids = new Set<string>();
-	if (!(await collectionExists())) return ids;
-
-	let offset: string | number | null = null;
-
-	for (;;) {
-		const response: QdrantScrollResponse = await qdrantRequest<QdrantScrollResponse>(
-			`/collections/${collectionName()}/points/scroll`,
-			{
-			method: 'POST',
-			body: JSON.stringify({
-				limit: 512,
-				offset,
-				with_vector: false,
-				with_payload: false
-			})
-			}
+	const hint = options?.pathContains?.trim();
+	if (hint) {
+		const h = hint.toLowerCase();
+		const filtered = hits.filter(
+			(x) => x.path.toLowerCase().includes(h) || x.filename.toLowerCase().includes(h)
 		);
-
-		const points = response.result?.points ?? [];
-		for (const point of points) ids.add(String(point.id));
-		offset = response.result?.next_page_offset ?? null;
-		if (!offset) break;
+		if (filtered.length > 0) hits = filtered;
 	}
 
-	return ids;
-}
-
-async function deletePoints(ids: string[]): Promise<void> {
-	if (ids.length === 0) return;
-	await qdrantRequest(`/collections/${collectionName()}/points/delete?wait=true`, {
-		method: 'POST',
-		body: JSON.stringify({ points: ids })
-	});
+	return hits.slice(0, limit);
 }
 
 export async function deleteSemanticEntryByRelativePath(relativePath: string): Promise<void> {
-	await deletePoints([createPointId(relativePath)]);
+	await brain.deletePoints(collectionName(), [createPointId(relativePath)]);
 }
 
 async function toMediaFileEntry(relativePath: string): Promise<MediaEntry | null> {
@@ -438,14 +309,14 @@ function rootIndexFromPath(relativePath: string): number {
 	return Number.isNaN(parsed) ? -1 : parsed;
 }
 
-async function makePoint(entry: MediaEntry): Promise<{ point: QdrantPoint; usedImageEmbedding: boolean }> {
+async function makePoint(entry: MediaEntry): Promise<{ point: BrainPoint; usedImageEmbedding: boolean }> {
 	const metadataText = buildMetadataText(entry);
-	let vector = await embedText(metadataText);
+	let vector = (await embedText(metadataText)).vector;
 	let usedImageEmbedding = false;
 
 	if (entry.mediaType === 'image') {
 		try {
-			const maybeImageVector = await embedImageWithMultimodal(entry.fullPath);
+			const maybeImageVector = await embedImage(entry.fullPath);
 			if (maybeImageVector) {
 				vector = maybeImageVector;
 				usedImageEmbedding = true;
@@ -455,7 +326,7 @@ async function makePoint(entry: MediaEntry): Promise<{ point: QdrantPoint; usedI
 		}
 	}
 
-	const point: QdrantPoint = {
+	const point: BrainPoint = {
 		id: createPointId(entry.path),
 		vector,
 		payload: {
@@ -486,13 +357,13 @@ export async function reindexSemanticCollection(): Promise<ReindexSummary> {
 		};
 	}
 
-	const existingIds = await scrollPointIds();
+	const existingIds = await brain.scrollPointIds(collectionName());
 
 	let indexed = 0;
 	let skipped = 0;
 	let imageContentEmbeddingsUsed = 0;
 	const newIds = new Set<string>();
-	let buffer: QdrantPoint[] = [];
+	let buffer: BrainPoint[] = [];
 	let ensured = false;
 
 	for (let i = 0; i < files.length; i += concurrency) {
@@ -515,7 +386,7 @@ export async function reindexSemanticCollection(): Promise<ReindexSummary> {
 			const { point, usedImageEmbedding } = result.value;
 			if (!ensured) {
 				ensured = true;
-				await ensureCollection(point.vector.length);
+				await brain.ensureCollection(collectionName(), point.vector.length);
 			}
 
 			buffer.push(point);
@@ -525,17 +396,17 @@ export async function reindexSemanticCollection(): Promise<ReindexSummary> {
 		}
 
 		if (buffer.length >= 64) {
-			await upsertPoints(buffer);
+			await brain.upsertPoints(collectionName(), buffer);
 			buffer = [];
 		}
 	}
 
 	if (buffer.length > 0) {
-		await upsertPoints(buffer);
+		await brain.upsertPoints(collectionName(), buffer);
 	}
 
 	const stale = Array.from(existingIds).filter((id) => !newIds.has(id));
-	await deletePoints(stale);
+	await brain.deletePoints(collectionName(), stale);
 
 	return {
 		totalFiles: files.length,
@@ -551,13 +422,13 @@ export async function indexFileByRelativePath(relativePath: string): Promise<boo
 	if (!entry) return false;
 
 	const { point } = await makePoint(entry);
-	await ensureCollection(point.vector.length);
-	await upsertPoints([point]);
+	await brain.ensureCollection(collectionName(), point.vector.length);
+	await brain.upsertPoints(collectionName(), [point]);
 	return true;
 }
 
 export async function semanticSearch(query: string, options?: { mediaType?: MediaType; rootIndex?: number; limit?: number; minScore?: number }): Promise<SearchResult[]> {
-	const vector = await embedText(query);
+	const vector = (await embedText(query)).vector;
 	const limit = Math.max(1, Math.min(options?.limit ?? 30, 100));
 	const minScore = typeof options?.minScore === 'number'
 		? options?.minScore
@@ -572,24 +443,11 @@ export async function semanticSearch(query: string, options?: { mediaType?: Medi
 		must.push({ key: 'rootIndex', match: { value: options.rootIndex } });
 	}
 
-	const response = await qdrantRequest<{
-		result?: Array<{
-			id: string | number;
-			score: number;
-			payload?: Record<string, unknown>;
-		}>;
-	}>(`/collections/${collectionName()}/points/search`, {
-		method: 'POST',
-		body: JSON.stringify({
-			vector,
-			limit,
-			with_payload: true,
-			with_vector: false,
-			filter: must.length > 0 ? { must } : undefined
-		})
+	const rows = await brain.search(collectionName(), {
+		vector,
+		limit,
+		filter: must.length > 0 ? { must } : undefined
 	});
-
-	const rows = response.result ?? [];
 	return rows
 		.filter((row) => typeof row.score === 'number' && row.score >= threshold)
 		.map((row) => {

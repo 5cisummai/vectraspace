@@ -1,6 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import fs from 'node:fs/promises';
-import { resolveSafePath } from '$lib/server/storage';
+import { resolveSafePath } from '$lib/server/services/storage';
 import type { RequestHandler } from './$types';
 
 export const POST: RequestHandler = async ({ params }) => {

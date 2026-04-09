@@ -49,3 +49,11 @@ export const db = globalForPrisma.prisma ?? createClient();
 if (process.env.NODE_ENV !== 'production') {
 	globalForPrisma.prisma = db;
 }
+
+/** After `prisma generate`, the old singleton can lack new models (e.g. chatSession). Drop it on HMR. */
+if (import.meta.env.DEV && import.meta.hot) {
+	import.meta.hot.dispose(async () => {
+		await globalForPrisma.prisma?.$disconnect().catch(() => {});
+		globalForPrisma.prisma = undefined;
+	});
+}

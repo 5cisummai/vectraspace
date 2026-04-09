@@ -2,7 +2,7 @@ import { verifyJwt, generateAccessToken } from '$lib/server/auth';
 import type { Handle } from '@sveltejs/kit';
 
 // Routes accessible without a valid JWT
-const PUBLIC_PATHS = ['/login', '/signup', '/api/auth/login', '/api/auth/signup'];
+const PUBLIC_PATHS = ['/login', '/signup', '/api/auth/login', '/api/auth/signup', '/api/auth/logout'];
 
 export const handle: Handle = async ({ event, resolve }) => {
 	const path = event.url.pathname;

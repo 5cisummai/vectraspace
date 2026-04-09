@@ -1,7 +1,7 @@
 import { json, error } from '@sveltejs/kit';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { isPathInsideRoot, resolveSafePath } from '$lib/server/storage';
+import { isPathInsideRoot, resolveSafePath } from '$lib/server/services/storage';
 import { db } from '$lib/server/db';
 import { env } from '$env/dynamic/private';
 import type { RequestHandler } from './$types';

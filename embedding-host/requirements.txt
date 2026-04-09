@@ -9,3 +9,4 @@ safetensors>=0.4.0
 qwen-vl-utils>=0.0.14
 torchvision
 torchaudio
+PyPDF2>=3.0.0

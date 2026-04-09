@@ -289,3 +289,43 @@ def embed(payload: EmbedRequest) -> EmbedResponse:
         return EmbedResponse(embedding=embedding)
 
     raise HTTPException(status_code=400, detail="type must be text or image")
+
+
+class ExtractRequest(BaseModel):
+    type: str = Field(pattern="^(text|pdf)$")
+    text: Optional[str] = None
+    fileBase64: Optional[str] = None
+    filename: Optional[str] = None
+
+
+class ExtractResponse(BaseModel):
+    text: Optional[str] = None
+    error: Optional[str] = None
+
+
+def _extract_text_from_pdf(base64_value: str) -> str:
+    try:
+        import PyPDF2
+        raw = base64.b64decode(base64_value)
+        pdf_file = io.BytesIO(raw)
+        reader = PyPDF2.PdfReader(pdf_file)
+        text = ''.join(page.extract_text() or '' for page in reader.pages)
+        return text
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"PDF extraction failed: {e}")
+
+
+@app.post("/extract", response_model=ExtractResponse)
+def extract(payload: ExtractRequest) -> ExtractResponse:
+    if payload.type == "text":
+        if not payload.text:
+            raise HTTPException(status_code=400, detail="text is required when type=text")
+        return ExtractResponse(text=payload.text[:50000])
+
+    if payload.type == "pdf":
+        if not payload.fileBase64:
+            raise HTTPException(status_code=400, detail="fileBase64 is required when type=pdf")
+        text = _extract_text_from_pdf(payload.fileBase64)
+        return ExtractResponse(text=text[:50000])
+
+    raise HTTPException(status_code=400, detail="type must be text or pdf")

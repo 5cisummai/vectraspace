@@ -1,7 +1,7 @@
 import { error } from '@sveltejs/kit';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
-import { resolveSafePath, getMediaInfo } from '$lib/server/storage';
+import { resolveSafePath, getMediaInfo } from '$lib/server/services/storage';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ params, request }) => {

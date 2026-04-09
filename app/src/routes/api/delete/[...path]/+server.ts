@@ -1,7 +1,7 @@
 import { error, json } from '@sveltejs/kit';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { resolveSafePath } from '$lib/server/storage';
+import { resolveSafePath } from '$lib/server/services/storage';
 import { deleteSemanticEntryByRelativePath } from '$lib/server/semantic';
 import { db } from '$lib/server/db';
 import type { RequestHandler } from './$types';

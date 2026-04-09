@@ -1,12 +1,28 @@
 <script lang="ts">
-	import type { LayoutData } from './$types';
+	import AppTopbar from '$lib/components/app-topbar.svelte';
 	import AppSidebar from '$lib/components/app-sidebar.svelte';
+	import { Separator } from '$lib/components/ui/separator/index.js';
+	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 
-	interface Props {
-		data: LayoutData;
-		children: any;
-	}
-
-	let { data, children } = $props() as Props;
+	let { children } = $props();
 </script>
-{@render children()}
+
+<div class="min-h-screen w-full bg-background text-foreground">
+	<Sidebar.Provider class="min-h-[calc(100svh-4.25rem)]">
+		<AppSidebar />
+
+		<div class="relative flex min-h-[calc(100svh-4.25rem)] w-full flex-col">
+			<AppTopbar>
+				{#snippet left()}
+					<div class="flex items-center gap-2">
+						<Sidebar.Trigger class="-ms-1" />
+						<Separator orientation="vertical" class="me-2 data-[orientation=vertical]:h-4" />
+					</div>
+				{/snippet}
+			</AppTopbar>
+			<div class="h-full w-full min-w-0">
+				{@render children()}
+			</div>
+		</div>
+	</Sidebar.Provider>
+</div>

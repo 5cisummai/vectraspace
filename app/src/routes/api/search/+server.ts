@@ -1,7 +1,7 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { semanticSearch } from '$lib/server/semantic';
-import type { MediaType } from '$lib/server/storage';
+import type { MediaType } from '$lib/server/services/storage';
 
 const ALLOWED_MEDIA_TYPES: MediaType[] = ['video', 'audio', 'image', 'document', 'other'];
 
