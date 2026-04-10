@@ -5,18 +5,16 @@
 	import { onMount } from 'svelte';
 	import ArrowUpIcon from '@lucide/svelte/icons/arrow-up';
 	import BotIcon from '@lucide/svelte/icons/bot';
-	import CheckCircleIcon from '@lucide/svelte/icons/check-circle';
-	import CircleIcon from '@lucide/svelte/icons/circle';
 	import LoaderIcon from '@lucide/svelte/icons/loader';
 	import MessageSquareIcon from '@lucide/svelte/icons/message-square';
 	import FilesIcon from '@lucide/svelte/icons/files';
 	import { Button } from '$lib/components/ui/button';
 	import { Textarea } from '$lib/components/ui/textarea';
 	import * as Card from '$lib/components/ui/card/index.js';
+	import { agentSessions } from '$lib/hooks/agent-sessions.svelte';
 	import type { FileEntry } from '$lib/components/file-browser/file-grid.svelte';
 	import FilePreviewTile from '$lib/components/file-browser/file-preview-tile.svelte';
 
-	// ── Greeting ──────────────────────────────────────────────────────────────
 	const username = $derived(($page.data.user as { username?: string } | undefined)?.username ?? '');
 
 	function greeting(): string {
@@ -26,7 +24,6 @@
 		return 'Good evening';
 	}
 
-	// ── Composer ──────────────────────────────────────────────────────────────
 	let composerValue = $state('');
 	let textareaEl = $state<HTMLElement | null>(null);
 
@@ -46,7 +43,8 @@
 	function submitComposer() {
 		const q = composerValue.trim();
 		if (!q) return;
-		goto(`${resolve('/(app)/chat')}?q=${encodeURIComponent(q)}`);
+		// eslint-disable-next-line svelte/no-navigation-without-resolve
+		goto(`/chat?q=${encodeURIComponent(q)}`);
 	}
 
 	const suggestions = [
@@ -73,8 +71,11 @@
 		try {
 			const res = await fetch('/api/chats');
 			if (res.ok) {
-				const data = (await res.json()) as { chats?: AgentSummary[] };
-				agents = Array.isArray(data.chats) ? data.chats : [];
+				const payload = (await res.json()) as { chats?: AgentSummary[] };
+				const chats = Array.isArray(payload.chats) ? payload.chats : [];
+				agents = chats;
+				// Seed the global store with initial statuses from the fetch.
+				agentSessions.seedFromChats(chats);
 			}
 		} finally {
 			loadingAgents = false;
@@ -94,11 +95,13 @@
 	}
 
 	function openAgent(id: string) {
-		goto(`${resolve('/(app)/chat')}?agent=${encodeURIComponent(id)}`);
+		// eslint-disable-next-line svelte/no-navigation-without-resolve
+		goto(`/chat?agent=${encodeURIComponent(id)}`);
 	}
 
 	function openNewAgent() {
-		goto(resolve('/(app)/chat'));
+		// eslint-disable-next-line svelte/no-navigation-without-resolve
+		goto(`/chat`);
 	}
 
 	// ── Media library ─────────────────────────────────────────────────────────
@@ -174,7 +177,8 @@
 	}
 
 	function openInBrowser(path: string) {
-		goto(`${resolve('/(app)/browse/media')}?file=${encodeURIComponent(path)}`);
+		// eslint-disable-next-line svelte/no-navigation-without-resolve
+		goto(`/browse/media?file=${encodeURIComponent(path)}`);
 	}
 </script>
 
@@ -226,7 +230,7 @@
 
 			<!-- Suggestion chips -->
 			<div class="flex flex-wrap justify-center gap-2">
-				{#each suggestions as s}
+				{#each suggestions as s (s)}
 					<button
 						type="button"
 						onclick={() => { composerValue = s; submitComposer(); }}
@@ -268,24 +272,31 @@
 			{:else}
 				<div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
 					{#each agents.slice(0, 6) as agent (agent.id)}
+						{@const isWorking = agentSessions.getStatus(agent.id) === 'working'}
 						<button
 							type="button"
 							onclick={() => openAgent(agent.id)}
-							class="group flex flex-col gap-2 rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-foreground/20 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+							class="group flex flex-col gap-2 rounded-xl border bg-card p-4 text-left transition-colors hover:border-foreground/20 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring {isWorking ? 'border-amber-400/40 dark:border-amber-500/30' : 'border-border'}"
 						>
-							<div class="flex items-start gap-2">
+							<div class="flex items-start justify-between gap-2">
+								<p class="line-clamp-2 flex-1 text-sm font-medium leading-snug">{agent.title}</p>
 								<div class="mt-0.5 shrink-0">
-									{#if agent.status === 'working'}
-										<LoaderIcon class="size-4 animate-spin text-muted-foreground" />
-									{:else if agent.status === 'done'}
-										<CheckCircleIcon class="size-4 text-green-500" />
+									{#if isWorking}
+										<LoaderIcon class="size-3.5 animate-spin text-amber-500" />
 									{:else}
-										<CircleIcon class="size-4 text-muted-foreground/40" />
+										<!-- green ready dot -->
+										<span class="relative flex size-2.5">
+											<span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-60 duration-1000"></span>
+											<span class="relative inline-flex size-2.5 rounded-full bg-green-500"></span>
+										</span>
 									{/if}
 								</div>
-								<p class="line-clamp-2 flex-1 text-sm font-medium leading-snug">{agent.title}</p>
 							</div>
 							<div class="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+								{#if isWorking}
+									<span class="font-medium text-amber-600 dark:text-amber-400">In progress</span>
+									<span>·</span>
+								{/if}
 								<MessageSquareIcon class="size-3" />
 								<span>{agent.messageCount}</span>
 								<span>·</span>
@@ -310,7 +321,7 @@
 					variant="ghost"
 					size="sm"
 					class="gap-1.5 text-xs"
-					onclick={() => goto(resolve('/(app)/browse'))}
+					onclick={() => goto(resolve('/browse'))}
 				>
 					<FilesIcon class="size-3.5" />
 					Browse all
@@ -324,7 +335,7 @@
 					<div class="flex flex-col gap-3">
 						<h3 class="text-sm font-medium">{s.title}</h3>
 						<div
-							class="-mx-1 flex snap-x snap-mandatory gap-3 overflow-x-auto overflow-y-visible px-1 pb-1 [scrollbar-gutter:stable] [mask-image:linear-gradient(to_right,black_calc(100%-2.5rem),transparent)] sm:[mask-image:none]"
+							class="-mx-1 flex snap-x snap-mandatory gap-3 overflow-x-auto overflow-y-visible px-1 pb-1 [scrollbar-gutter:stable] mask-[linear-gradient(to_right,black_calc(100%-2.5rem),transparent)] sm:mask-none"
 							role="region"
 							aria-label={s.aria}
 						>

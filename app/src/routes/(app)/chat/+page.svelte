@@ -21,6 +21,7 @@
 		SIDEBAR_COOKIE_MAX_AGE,
 	} from '$lib/components/ui/sidebar/constants.js';
 	import { IsMobile } from '$lib/hooks/is-mobile.svelte.js';
+	import type { PageData } from './$types';
 
 	/** Matches Tailwind `md:` — agents list uses inline sidebar on desktop, sheet on small screens. */
 	const isNarrowViewport = new IsMobile();
@@ -34,7 +35,7 @@
 		status: 'idle' | 'working' | 'done';
 	}
 
-	let { data } = $props();
+	let { data }: { data: PageData } = $props();
 
 	let agents = $state<AgentSummary[]>([]);
 	let activeAgentId = $state<string | null>(null);

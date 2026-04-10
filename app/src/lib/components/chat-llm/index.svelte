@@ -1,10 +1,11 @@
 <script lang="ts">
-	import { tick } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import { apiFetch } from '$lib/api-fetch';
 	import {
 		addAutoApproveToolName,
 		getAutoApproveToolNames
 	} from '$lib/agent-auto-approve';
+	import { agentSessions } from '$lib/hooks/agent-sessions.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { Textarea } from '$lib/components/ui/textarea';
@@ -48,6 +49,21 @@
 	let backgroundPollTimer: ReturnType<typeof setTimeout> | null = null;
 	/** Aborts in-flight ask/confirm HTTP and background status polls for the current run. */
 	let agentRunAbortController: AbortController | null = null;
+
+	// Sync local status to the global agentSessions store so any page can
+	// read live status without polling.
+	$effect(() => {
+		const chatId = activeChatId;
+		const status = activeAgentStatus;
+		if (!chatId) return;
+		untrack(() => {
+			if (status === 'working') {
+				agentSessions.setWorking(chatId);
+			} else {
+				agentSessions.setIdle(chatId);
+			}
+		});
+	});
 
 	const SUBMIT_DEBOUNCE_MS = 400;
 

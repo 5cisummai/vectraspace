@@ -1,13 +1,21 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import AppTopbar from '$lib/components/app-topbar.svelte';
 	import AppSidebar from '$lib/components/app-sidebar.svelte';
 	import { Separator } from '$lib/components/ui/separator/index.js';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
+	import { agentSessions } from '$lib/hooks/agent-sessions.svelte';
+
 	let { children, data } = $props();
 
 	// Cookie-backed default for SSR/hydration; toggles update via bind:open + cookie.
 	// svelte-ignore state_referenced_locally
 	let sidebarOpen = $state(data.sidebarOpen);
+
+	onMount(() => {
+		agentSessions.connect();
+		return () => agentSessions.disconnect();
+	});
 </script>
 
 <div class="h-screen w-full overflow-hidden bg-background text-foreground">

@@ -7,6 +7,22 @@ export type BackgroundRunStatus =
 	| 'done'
 	| 'failed';
 
+// ---------------------------------------------------------------------------
+// Subscriber bus — lets the SSE endpoint push real-time status to clients.
+// ---------------------------------------------------------------------------
+type RunStatusListener = (userId: string, chatId: string, status: BackgroundRunStatus) => void;
+
+const listeners = new Set<RunStatusListener>();
+
+export function subscribeRunStatus(cb: RunStatusListener): () => void {
+	listeners.add(cb);
+	return () => listeners.delete(cb);
+}
+
+function emit(run: BackgroundRunRecord): void {
+	for (const cb of listeners) cb(run.userId, run.chatId, run.status);
+}
+
 export interface RunPendingConfirmation {
 	pendingId: string;
 	tool: string;
@@ -98,16 +114,14 @@ export function createBackgroundRun(
 		updatedAt: now
 	};
 	runs.set(run.id, run);
+	emit(run);
 	return run;
 }
 
 export function markRunRunning(runId: string): BackgroundRunRecord | null {
-	return updateRun(runId, (run) => ({
-		...run,
-		status: 'running',
-		error: undefined,
-		toolStreamLog: []
-	}));
+	const run = updateRun(runId, (r) => ({ ...r, status: 'running', error: undefined, toolStreamLog: [] }));
+	if (run) emit(run);
+	return run;
 }
 
 export function appendRunToolStreamEvent(
@@ -124,30 +138,36 @@ export function markRunAwaitingConfirmation(
 	runId: string,
 	pending: RunPendingConfirmation
 ): BackgroundRunRecord | null {
-	return updateRun(runId, (run) => ({
-		...run,
+	const run = updateRun(runId, (r) => ({
+		...r,
 		status: 'awaiting_confirmation',
 		pendingToolConfirmation: pending,
 		error: undefined
 	}));
+	if (run) emit(run);
+	return run;
 }
 
 export function markRunDone(runId: string): BackgroundRunRecord | null {
-	return updateRun(runId, (run) => ({
-		...run,
+	const run = updateRun(runId, (r) => ({
+		...r,
 		status: 'done',
 		pendingToolConfirmation: undefined,
 		error: undefined
 	}));
+	if (run) emit(run);
+	return run;
 }
 
 export function markRunFailed(runId: string, message: string): BackgroundRunRecord | null {
-	return updateRun(runId, (run) => ({
-		...run,
+	const run = updateRun(runId, (r) => ({
+		...r,
 		status: 'failed',
 		error: message,
 		pendingToolConfirmation: undefined
 	}));
+	if (run) emit(run);
+	return run;
 }
 
 export function getBackgroundRunForUser(
