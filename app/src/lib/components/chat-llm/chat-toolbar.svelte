@@ -12,6 +12,7 @@
 		PopoverTrigger
 	} from '$lib/components/ui/popover';
 	import { Separator } from '$lib/components/ui/separator';
+	import * as Select from '$lib/components/ui/select/index.js';
 
 	let {
 		maxHistoryMessages = $bindable(40),
@@ -30,7 +31,6 @@
 	} = $props();
 
 	const presets = [10, 20, 40, 80];
-	const selectId = `chat-history-limit-${Math.random().toString(36).slice(2, 9)}`;
 	let optionsOpen = $state(false);
 </script>
 
@@ -74,20 +74,21 @@
 					<p class="text-xs leading-relaxed text-muted-foreground">
 						How many prior user/assistant messages are sent to the model on the next request.
 					</p>
-					<label for={selectId} class="sr-only">History depth</label>
-					<select
-						id={selectId}
-						class="rounded-md border border-border/60 bg-background px-2 py-2 text-sm text-foreground"
-						{disabled}
+					<Select.Root
+						type="single"
 						value={String(maxHistoryMessages)}
-						onchange={(e) => {
-							maxHistoryMessages = Number((e.currentTarget as HTMLSelectElement).value);
-						}}
+						onValueChange={(v: string) => { if (v) maxHistoryMessages = Number(v); }}
+						{disabled}
 					>
-						{#each presets as p (p)}
-							<option value={String(p)}>Last {p} messages</option>
-						{/each}
-					</select>
+						<Select.Trigger class="w-full" aria-label="History depth">
+							Last {maxHistoryMessages} messages
+						</Select.Trigger>
+						<Select.Content>
+							{#each presets as p (p)}
+								<Select.Item value={String(p)} label={`Last ${p} messages`} />
+							{/each}
+						</Select.Content>
+					</Select.Root>
 				</section>
 
 				<Separator />

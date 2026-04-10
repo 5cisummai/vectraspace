@@ -143,7 +143,11 @@
 		void (async () => {
 			await fetchAgents();
 			await tick();
-			if (agents.length > 0) {
+			if (data.initialMessage) {
+				await agentPanel?.startWithMessage(data.initialMessage);
+			} else if (data.agentId) {
+				await agentPanel?.loadConversationFromServer(data.agentId);
+			} else if (agents.length > 0) {
 				await agentPanel?.loadConversationFromServer(agents[0].id);
 			}
 		})();
@@ -245,7 +249,7 @@
 {/snippet}
 
 <div class="flex h-full min-h-0 w-full flex-col bg-background">
-	<Sidebar.Provider class="mx-auto flex h-full min-h-0 w-full max-w-6xl flex-1">
+	<Sidebar.Provider class="flex h-full min-h-0 w-full flex-1">
 		{#if agentSidebarOpen && !isNarrowViewport.current}
 			<Sidebar.Root
 				class="flex h-full min-h-0 w-72 shrink-0 border-r border-border/60 bg-muted/20"

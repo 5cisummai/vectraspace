@@ -1,8 +1,7 @@
 <script lang="ts">
 	import './layout.css';
-	import favicon from '$lib/assets/favicon.svg';
+	import vectraspaceLogoLight from '$lib/assets/logos/vectraspace-icon-light.png';
 	import { goto } from '$app/navigation';
-	import { resolve } from '$app/paths';
 	import { Upload, RefreshCw, CheckCircle, AlertCircle, X } from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { uploadManager } from '$lib/upload-manager';
@@ -13,13 +12,13 @@
 
 	function openUploads() {
 		const destination = $uploadManager.activeDestination;
-		const uploadPath = resolve('/upload');
+		const uploadPath = '/upload';
 		// eslint-disable-next-line svelte/no-navigation-without-resolve
 		goto(destination ? `${uploadPath}?dest=${encodeURIComponent(destination)}` : uploadPath);
 	}
 </script>
 
-<svelte:head><link rel="icon" href={favicon} /></svelte:head>
+<svelte:head><link rel="icon" href={vectraspaceLogoLight} /></svelte:head>
 <ModeWatcher />
 <Toaster />
 {@render children()}

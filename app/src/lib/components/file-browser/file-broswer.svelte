@@ -90,13 +90,9 @@
 		<Breadcrumb.Root class="min-w-0 flex-1">
 			<Breadcrumb.List>
 				<Breadcrumb.Item>
-					<button
-						type="button"
-						class="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-						onclick={() => navigateTo('')}
-					>
+					<Button variant="link" class="h-auto p-0 text-sm font-medium text-muted-foreground" onclick={() => navigateTo('')}>
 						Root
-					</button>
+					</Button>
 				</Breadcrumb.Item>
 				{#each pathSegments as segment, index (index)}
 					<Breadcrumb.Separator />
@@ -104,13 +100,9 @@
 						{#if index === pathSegments.length - 1}
 							<Breadcrumb.Page class="text-sm font-medium">{segment}</Breadcrumb.Page>
 						{:else}
-							<button
-								type="button"
-								class="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-								onclick={() => navigateTo(pathSegments.slice(0, index + 1).join('/'))}
-							>
+							<Button variant="link" class="h-auto p-0 text-sm font-medium text-muted-foreground" onclick={() => navigateTo(pathSegments.slice(0, index + 1).join('/'))}>
 								{segment}
-							</button>
+							</Button>
 						{/if}
 					</Breadcrumb.Item>
 				{/each}

@@ -17,6 +17,7 @@
 	import FolderIcon from '@lucide/svelte/icons/folder';
 	import FileIcon from '@lucide/svelte/icons/file';
 	import { createEventDispatcher } from 'svelte';
+	import { Button } from '$lib/components/ui/button';
 	import FileTreeSelf from './file-tree.svelte';
 
 	let {
@@ -114,27 +115,23 @@
 				</Collapsible.Content>
 			</Collapsible.Root>
 		{:else}
-			<button
-				type="button"
-				class={isSubTree
-					? 'flex w-full items-center gap-2 truncate rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground'
-					: 'flex w-full items-center gap-2 truncate rounded-md px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground'}
-				onclick={() => select(path)}
-			>
-				<FolderIcon class="size-4 shrink-0 text-muted-foreground" />
-				<span class="truncate">{name}</span>
-			</button>
-		{/if}
-	{:else}
-		<button
-			type="button"
-			class={isSubTree
-				? 'flex w-full items-center gap-2 truncate rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground'
-				: 'flex w-full items-center gap-2 truncate rounded-md px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground'}
+			<Button
+			variant="ghost"
+			class="w-full justify-start gap-2 h-auto px-2 py-1.5 text-sm {isSubTree ? 'rounded-sm' : 'rounded-md'}"
 			onclick={() => select(path)}
 		>
-			<FileIcon class="size-4 shrink-0 text-muted-foreground" />
+			<FolderIcon class="size-4 shrink-0 text-muted-foreground" />
 			<span class="truncate">{name}</span>
-		</button>
+		</Button>
+		{/if}
+	{:else}
+		<Button
+		variant="ghost"
+		class="w-full justify-start gap-2 h-auto px-2 py-1.5 text-sm {isSubTree ? 'rounded-sm' : 'rounded-md'}"
+		onclick={() => select(path)}
+	>
+		<FileIcon class="size-4 shrink-0 text-muted-foreground" />
+		<span class="truncate">{name}</span>
+	</Button>
 	{/if}
 {/each}

@@ -1,6 +1,11 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import * as Tabs from '$lib/components/ui/tabs/index.js';
+	import * as Table from '$lib/components/ui/table/index.js';
+	import { Button } from '$lib/components/ui/button';
+	import { Badge } from '$lib/components/ui/badge';
+	import { Card } from '$lib/components/ui/card';
+	import { Checkbox } from '$lib/components/ui/checkbox';
 	import * as Progress from '$lib/components/ui/progress/index.js';
 	import FolderIcon from '@lucide/svelte/icons/folder';
 	import UsersIcon from '@lucide/svelte/icons/users';
@@ -250,7 +255,7 @@
 				{:else}
 					<div class="space-y-4">
 						{#each drives as drive}
-							<div class="rounded-md border border-border p-4">
+							<Card class="p-4">
 								<div class="flex items-center justify-between mb-2">
 									<div class="flex items-center gap-2">
 										<HardDriveIcon class="size-5 text-muted-foreground" />
@@ -273,20 +278,20 @@
 								{:else if !drive.available}
 									<p class="text-sm text-muted-foreground">Drive is not accessible.</p>
 								{/if}
-							</div>
+							</Card>
 						{/each}
 					</div>
 				{/if}
 
-				<div class="rounded-md border border-border bg-muted/50 p-4">
+				<Card class="bg-muted/50 p-4">
 					<h3 class="text-sm font-medium mb-2">Adding More Drives</h3>
 					<p class="text-sm text-muted-foreground">
 						To add more storage drives, edit the <code class="text-xs bg-muted px-1 rounded">.env</code> file and add paths separated by commas to the <code class="text-xs bg-muted px-1 rounded">MEDIA_ROOTS</code> variable:
 					</p>
 					<code class="block mt-2 text-xs bg-muted p-2 rounded">MEDIA_ROOTS=/path/to/drive1,/path/to/drive2</code>
-				</div>
+				</Card>
 
-				<div class="rounded-md border border-border p-4">
+				<Card class="p-4">
 					<h3 class="text-sm font-medium mb-2">Search &amp; AI chat indexing</h3>
 					<p class="text-sm text-muted-foreground mb-3">
 						<strong class="font-medium text-foreground">Reindex</strong> refreshes the filename and metadata
@@ -296,15 +301,13 @@
 					</p>
 					{#if isAdmin}
 						<div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-							<button
-								type="button"
-								class="inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-								onclick={reindex}
-								disabled={reindexing || ingestingRoot !== null}
-							>
-								<RefreshCwIcon class="size-4 {reindexing ? 'animate-spin' : ''}" />
-								{reindexing ? 'Reindexing...' : 'Reindex search'}
-							</button>
+							<Button
+							onclick={reindex}
+							disabled={reindexing || ingestingRoot !== null}
+						>
+							<RefreshCwIcon class="size-4 {reindexing ? 'animate-spin' : ''}" />
+							{reindexing ? 'Reindexing...' : 'Reindex search'}
+						</Button>
 						</div>
 						{#if reindexStatus === 'success'}
 							<p class="mt-2 text-sm text-green-600">Reindex completed successfully.</p>
@@ -320,17 +323,16 @@
 							<div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
 								{#each drives as drive}
 									{#if drive.available}
-										<button
-											type="button"
-											class="inline-flex items-center justify-center gap-2 rounded-md border border-border bg-background px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
-											onclick={() => ingestDirectory(drive.index)}
-											disabled={reindexing || ingestingRoot !== null}
-										>
-											<FolderInputIcon
-												class="size-4 {ingestingRoot === drive.index ? 'animate-pulse' : ''}"
-											/>
-											{ingestingRoot === drive.index ? 'Ingesting…' : `Ingest ${drive.name}`}
-										</button>
+										<Button
+									variant="outline"
+									onclick={() => ingestDirectory(drive.index)}
+									disabled={reindexing || ingestingRoot !== null}
+								>
+									<FolderInputIcon
+										class="size-4 {ingestingRoot === drive.index ? 'animate-pulse' : ''}"
+									/>
+									{ingestingRoot === drive.index ? 'Ingesting…' : `Ingest ${drive.name}`}
+								</Button>
 									{/if}
 								{/each}
 							</div>
@@ -345,11 +347,11 @@
 							Only administrators can reindex or ingest content for search and chat.
 						</p>
 					{/if}
-				</div>
+				</Card>
 			</Tabs.Content>
 
 			<Tabs.Content value="assistant" class="space-y-4">
-				<div class="rounded-md border border-border p-4">
+				<Card class="p-4">
 					<h3 class="text-sm font-medium mb-1">AI assistant — file actions</h3>
 					<p class="text-sm text-muted-foreground mb-4">
 						When the chat assistant wants to change files (delete, move, copy, or create folders), it
@@ -362,16 +364,15 @@
 								<label
 									class="flex cursor-pointer items-start gap-3 rounded-md border border-transparent p-2 hover:bg-muted/50 has-focus-visible:ring-2 has-focus-visible:ring-ring"
 								>
-									<input
-										type="checkbox"
-										class="mt-0.5 size-4 shrink-0 rounded border border-input accent-primary"
-										checked={agentAutoApprove[opt.id]}
-										onchange={(e) => {
-											const on = e.currentTarget.checked;
-											setAutoApproveSettingEnabled(opt.id, on);
-											agentAutoApprove = { ...agentAutoApprove, [opt.id]: on };
-										}}
-									/>
+									<Checkbox
+								checked={agentAutoApprove[opt.id]}
+								onCheckedChange={(checked) => {
+									const on = !!checked;
+									setAutoApproveSettingEnabled(opt.id, on);
+									agentAutoApprove = { ...agentAutoApprove, [opt.id]: on };
+								}}
+								class="mt-0.5"
+							/>
 									<span class="min-w-0">
 										<span class="block text-sm font-medium text-foreground">{opt.label}</span>
 										<span class="block text-xs text-muted-foreground">{opt.description}</span>
@@ -380,80 +381,74 @@
 							</li>
 						{/each}
 					</ul>
-				</div>
+				</Card>
 			</Tabs.Content>
 
 			<Tabs.Content value="users" class="space-y-4">
 				{#if loading}
 					<p class="text-sm text-muted-foreground">Loading users...</p>
 				{:else}
-					<div class="rounded-md border border-border">
-						<table class="w-full text-sm">
-							<thead>
-								<tr class="border-b border-border bg-muted/50">
-									<th class="text-left p-3 font-medium">Username</th>
-									<th class="text-left p-3 font-medium">Display Name</th>
-									<th class="text-left p-3 font-medium">Role</th>
-									<th class="text-left p-3 font-medium">Status</th>
-								</tr>
-							</thead>
-							<tbody>
+					<div class="rounded-md border">
+						<Table.Root>
+							<Table.Header>
+								<Table.Row>
+									<Table.Head>Username</Table.Head>
+									<Table.Head>Display Name</Table.Head>
+									<Table.Head>Role</Table.Head>
+									<Table.Head>Status</Table.Head>
+								</Table.Row>
+							</Table.Header>
+							<Table.Body>
 								{#each users as user}
-									<tr class="border-b border-border last:border-0">
-										<td class="p-3">{user.username}</td>
-										<td class="p-3">{user.displayName}</td>
-										<td class="p-3">
-											<span
-												class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {user.role === 'ADMIN'
-													? 'bg-primary/10 text-primary'
-													: 'bg-muted text-muted-foreground'}"
-											>
+									<Table.Row>
+										<Table.Cell>{user.username}</Table.Cell>
+										<Table.Cell>{user.displayName}</Table.Cell>
+										<Table.Cell>
+											<Badge variant={user.role === 'ADMIN' ? 'default' : 'secondary'}>
 												{user.role}
-											</span>
-										</td>
-										<td class="p-3">
-											<span
-												class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {user.approved
-													? 'bg-green-500/10 text-green-600'
-													: 'bg-yellow-500/10 text-yellow-600'}"
-											>
+											</Badge>
+										</Table.Cell>
+										<Table.Cell>
+											<Badge variant={user.approved ? 'outline' : 'secondary'}>
 												{user.approved ? 'Active' : 'Pending'}
-											</span>
-										</td>
-									</tr>
+											</Badge>
+										</Table.Cell>
+									</Table.Row>
 								{/each}
-							</tbody>
-						</table>
+							</Table.Body>
+						</Table.Root>
 					</div>
 
 					{#if isAdmin && pendingUsers.length > 0}
 						<div class="space-y-3">
 							<h3 class="text-sm font-medium">Pending Users</h3>
 							{#each pendingUsers as pending}
-								<div class="flex items-center justify-between rounded-md border border-border p-4">
+								<Card class="flex items-center justify-between p-4">
 									<div>
 										<p class="font-medium">{pending.displayName}</p>
 										<p class="text-sm text-muted-foreground">@{pending.username}</p>
 									</div>
 									<div class="flex gap-2">
-										<button
-											type="button"
-											class="inline-flex items-center gap-1 rounded-md bg-green-500/10 px-3 py-1.5 text-sm font-medium text-green-600 hover:bg-green-500/20"
-											onclick={() => approveUser(pending.id)}
-										>
-											<CheckIcon class="size-4" />
-											Accept
-										</button>
-										<button
-											type="button"
-											class="inline-flex items-center gap-1 rounded-md bg-destructive/10 px-3 py-1.5 text-sm font-medium text-destructive hover:bg-destructive/20"
-											onclick={() => rejectUser(pending.id)}
-										>
-											<XIcon class="size-4" />
-											Reject
-										</button>
+										<Button
+										variant="outline"
+										size="sm"
+										class="text-green-600 border-green-500/30 hover:bg-green-500/10"
+										onclick={() => approveUser(pending.id)}
+									>
+										<CheckIcon class="size-4" />
+										Accept
+									</Button>
+										<Button
+										variant="outline"
+										size="sm"
+										class="text-destructive border-destructive/30 hover:bg-destructive/10"
+										onclick={() => rejectUser(pending.id)}
+									>
+										<XIcon class="size-4" />
+										Reject
+									</Button>
 									</div>
-								</div>
+								</Card>
 							{/each}
 						</div>
 					{/if}
@@ -461,18 +456,18 @@
 			</Tabs.Content>
 
 			<Tabs.Content value="info" class="space-y-4">
-				<div class="rounded-md border border-border p-4">
+				<Card class="p-4">
 					<h3 class="text-sm font-medium mb-2">Version</h3>
 					<p class="text-sm text-muted-foreground">Vectraspace Media Server v0.1.0</p>
-				</div>
+				</Card>
 
-				<div class="rounded-md border border-border p-4">
+				<Card class="p-4">
 					<h3 class="text-sm font-medium mb-2">Legal</h3>
 					<p class="text-sm text-muted-foreground">
 						This software is provided as-is for personal use. Use at your own risk.
 						Ensure you have proper backups of your media files.
 					</p>
-				</div>
+				</Card>
 			</Tabs.Content>
 		</Tabs.Root>
 	</main>

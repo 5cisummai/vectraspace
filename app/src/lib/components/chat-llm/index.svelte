@@ -6,6 +6,8 @@
 		getAutoApproveToolNames
 	} from '$lib/agent-auto-approve';
 	import { Button } from '$lib/components/ui/button';
+	import { Checkbox } from '$lib/components/ui/checkbox';
+	import { Textarea } from '$lib/components/ui/textarea';
 	import ChatMessageBubble from './chat-message-bubble.svelte';
 	import ChatComposer from './chat-composer.svelte';
 	import ChatToolbar from './chat-toolbar.svelte';
@@ -792,6 +794,14 @@
 		editingUserId = null;
 	}
 
+	export async function startWithMessage(msg: string): Promise<void> {
+		if (loading || !msg.trim()) return;
+		resetConversation();
+		input = msg.trim();
+		await tick();
+		await sendMessage();
+	}
+
 	$effect(() => {
 		return () => {
 			clearBackgroundPolling();
@@ -1034,12 +1044,12 @@
 								<div class="w-full border-b border-border/70 py-5">
 									<div class="w-full border border-border bg-muted/20 p-3">
 										<label class="sr-only" for="edit-user-msg">Edit message</label>
-										<textarea
+										<Textarea
 											id="edit-user-msg"
 											bind:value={editDraft}
-											rows="4"
-											class="w-full resize-y rounded-md border border-border bg-background px-3 py-2 text-sm"
-										></textarea>
+											rows={4}
+											class="w-full resize-y"
+										/>
 										<div class="mt-2 flex justify-end gap-2">
 											<Button type="button" variant="ghost" size="sm" onclick={cancelEdit}
 												>Cancel</Button
@@ -1138,11 +1148,10 @@
 					· {summarizeToolArgs(pendingToolConfirmation.tool, pendingToolConfirmation.args)}
 				</p>
 				<label class="mt-3 flex cursor-pointer items-start gap-2.5 text-xs leading-snug text-muted-foreground">
-					<input
-						type="checkbox"
-						class="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border border-amber-300/90 accent-amber-600 dark:border-amber-800"
+					<Checkbox
 						bind:checked={autoApproveThisKind}
 						disabled={loading}
+						class="mt-0.5 size-3.5 shrink-0"
 					/>
 					<span>
 						Auto-approve future
@@ -1175,7 +1184,7 @@
 		</div>
 	{/if}
 
-	<div class="shrink-0 border-t border-border/60 bg-background px-3 py-3">
+	<div class="shrink-0 border-border/60 bg-background px-3 py-3">
 		<ChatComposer
 			bind:value={input}
 			disabled={loading || loadingConversation}

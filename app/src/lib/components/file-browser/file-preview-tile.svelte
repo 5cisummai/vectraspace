@@ -78,7 +78,7 @@
 			></video>
 		{:else}
 			<div class="flex h-full w-full items-center justify-center text-muted-foreground">
-				<TileIcon class="h-10 w-10" />
+				<TileIcon class="size-10 shrink-0" />
 			</div>
 		{/if}
 	</div>

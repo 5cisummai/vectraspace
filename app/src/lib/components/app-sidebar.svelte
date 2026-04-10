@@ -61,11 +61,6 @@
 					class="flex h-12 items-center gap-2 px-2 text-sidebar-foreground"
 					data-slot="sidebar-brand"
 				>
-					<div
-						class="bg-sidebar-primary text-sidebar-primary-foreground flex size-8 shrink-0 items-center justify-center rounded-lg text-sm font-semibold"
-					>
-						V
-					</div>
 					<span class="truncate font-semibold tracking-tight">Vectraspace</span>
 				</div>
 			</Sidebar.MenuItem>

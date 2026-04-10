@@ -286,15 +286,13 @@
 					<li>
 						<ContextMenu.Root>
 							<ContextMenu.Trigger>
-								<button
-									type="button"
-									class="w-full rounded-xl p-1 text-left transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none {selectedPath ===
-									item.path
-										? 'bg-muted ring-1 ring-ring/60'
-										: ''}"
-									onclick={() => selectEntry(item)}
-								>
+								<Button
+								variant="ghost"
+								class="w-full h-auto rounded-xl p-1 text-left {selectedPath === item.path ? 'bg-muted ring-1 ring-ring/60' : ''}"
+								onclick={() => selectEntry(item)}
+							>
 									<FilePreviewTile
+										class="w-full"
 										item={{
 											name: item.name,
 											path: item.path,
@@ -302,7 +300,7 @@
 											type: item.type
 										}}
 									/>
-								</button>
+								</Button>
 							</ContextMenu.Trigger>
 							<ContextMenu.Content class="w-48">
 								<ContextMenu.Item onclick={() => openEntry(item)}>Open</ContextMenu.Item>
