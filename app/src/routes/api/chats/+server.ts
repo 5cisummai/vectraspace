@@ -4,7 +4,7 @@ import {
 	listChatsForUser,
 	titleFromQuestion
 } from '$lib/server/chat-store';
-import { getActiveBackgroundRunForChat } from '$lib/server/background-agent-runs';
+import { getActiveRunForChat } from '$lib/server/agent-runs';
 import type { RequestHandler } from './$types';
 
 interface CreateChatRequest {
@@ -17,15 +17,17 @@ export const GET: RequestHandler = async ({ locals }) => {
 	const chats = await listChatsForUser(locals.user.id);
 	const userId = locals.user.id;
 
-	const chatsWithStatus = chats.map((chat) => {
-		const run = getActiveBackgroundRunForChat(userId, chat.id);
-		const status: 'idle' | 'working' | 'done' = run
-			? run.status === 'done' || run.status === 'failed'
-				? 'done'
-				: 'working'
-			: 'idle';
-		return { ...chat, status };
-	});
+	const chatsWithStatus = await Promise.all(
+		chats.map(async (chat) => {
+			const run = await getActiveRunForChat(chat.id, userId);
+			const status: 'idle' | 'working' | 'done' = run
+				? run.status === 'DONE' || run.status === 'FAILED'
+					? 'done'
+					: 'working'
+				: 'idle';
+			return { ...chat, status };
+		})
+	);
 
 	return json({ chats: chatsWithStatus });
 };

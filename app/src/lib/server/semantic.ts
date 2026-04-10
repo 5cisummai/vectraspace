@@ -81,12 +81,14 @@ function resolveReindexConcurrency(): number {
 	return Math.min(Math.floor(candidate), MAX_REINDEX_CONCURRENCY);
 }
 
-function collectionName(): string {
+export function collectionName(workspaceId?: string): string {
+	if (workspaceId) return `ws_${workspaceId}_semantic`;
 	return env.QDRANT_COLLECTION ?? 'media_semantic';
 }
 
 /** Qdrant collection populated by `/api/ingest/*` (text chunks + embeddings). */
-export function ingestCollectionName(): string {
+export function ingestCollectionName(workspaceId?: string): string {
+	if (workspaceId) return `ws_${workspaceId}_ingest`;
 	return env.QDRANT_INGEST_COLLECTION ?? 'media_ingest';
 }
 
@@ -183,6 +185,7 @@ export async function buildDirectoryListingContext(
 export async function searchIngestChunks(
 	query: string,
 	options?: {
+		workspaceId?: string;
 		rootIndex?: number;
 		/** If set, keep hits whose path or filename contains this substring (case-insensitive). */
 		pathContains?: string | null;
@@ -208,7 +211,7 @@ export async function searchIngestChunks(
 
 	let rows;
 	try {
-		rows = await brain.search(ingestCollectionName(), {
+		rows = await brain.search(ingestCollectionName(options?.workspaceId), {
 			vector,
 			limit: prefetch,
 			filter: must.length > 0 ? { must } : undefined
@@ -248,8 +251,8 @@ export async function searchIngestChunks(
 	return hits.slice(0, limit);
 }
 
-export async function deleteSemanticEntryByRelativePath(relativePath: string): Promise<void> {
-	await brain.deletePoints(collectionName(), [createPointId(relativePath)]);
+export async function deleteSemanticEntryByRelativePath(relativePath: string, workspaceId?: string): Promise<void> {
+	await brain.deletePoints(collectionName(workspaceId), [createPointId(relativePath)]);
 }
 
 async function toMediaFileEntry(relativePath: string): Promise<MediaEntry | null> {
@@ -387,7 +390,7 @@ async function makePoint(entry: MediaEntry): Promise<{ point: BrainPoint; usedIm
 	return { point, usedImageEmbedding };
 }
 
-export async function reindexSemanticCollection(): Promise<ReindexSummary> {
+export async function reindexSemanticCollection(workspaceId?: string): Promise<ReindexSummary> {
 	const files = await collectAllFiles();
 	const concurrency = resolveReindexConcurrency();
 	if (files.length === 0) {
@@ -400,7 +403,7 @@ export async function reindexSemanticCollection(): Promise<ReindexSummary> {
 		};
 	}
 
-	const existingIds = await brain.scrollPointIds(collectionName());
+	const existingIds = await brain.scrollPointIds(collectionName(workspaceId));
 
 	let indexed = 0;
 	let skipped = 0;
@@ -429,7 +432,7 @@ export async function reindexSemanticCollection(): Promise<ReindexSummary> {
 			const { point, usedImageEmbedding } = result.value;
 			if (!ensured) {
 				ensured = true;
-				await brain.ensureCollection(collectionName(), point.vector.length);
+				await brain.ensureCollection(collectionName(workspaceId), point.vector.length);
 			}
 
 			buffer.push(point);
@@ -439,17 +442,17 @@ export async function reindexSemanticCollection(): Promise<ReindexSummary> {
 		}
 
 		if (buffer.length >= 64) {
-			await brain.upsertPoints(collectionName(), buffer);
+			await brain.upsertPoints(collectionName(workspaceId), buffer);
 			buffer = [];
 		}
 	}
 
 	if (buffer.length > 0) {
-		await brain.upsertPoints(collectionName(), buffer);
+		await brain.upsertPoints(collectionName(workspaceId), buffer);
 	}
 
 	const stale = Array.from(existingIds).filter((id) => !newIds.has(id));
-	await brain.deletePoints(collectionName(), stale);
+	await brain.deletePoints(collectionName(workspaceId), stale);
 
 	return {
 		totalFiles: files.length,
@@ -460,17 +463,17 @@ export async function reindexSemanticCollection(): Promise<ReindexSummary> {
 	};
 }
 
-export async function indexFileByRelativePath(relativePath: string): Promise<boolean> {
+export async function indexFileByRelativePath(relativePath: string, workspaceId?: string): Promise<boolean> {
 	const entry = await toMediaFileEntry(relativePath);
 	if (!entry) return false;
 
 	const { point } = await makePoint(entry);
-	await brain.ensureCollection(collectionName(), point.vector.length);
-	await brain.upsertPoints(collectionName(), [point]);
+	await brain.ensureCollection(collectionName(workspaceId), point.vector.length);
+	await brain.upsertPoints(collectionName(workspaceId), [point]);
 	return true;
 }
 
-export async function semanticSearch(query: string, options?: { mediaType?: MediaType; rootIndex?: number; limit?: number; minScore?: number }): Promise<SearchResult[]> {
+export async function semanticSearch(query: string, options?: { workspaceId?: string; mediaType?: MediaType; rootIndex?: number; limit?: number; minScore?: number }): Promise<SearchResult[]> {
 	const vector = (await embedText(query)).vector;
 	const limit = Math.max(1, Math.min(options?.limit ?? 30, 100));
 	const minScore = typeof options?.minScore === 'number'
@@ -486,7 +489,7 @@ export async function semanticSearch(query: string, options?: { mediaType?: Medi
 		must.push({ key: 'rootIndex', match: { value: options.rootIndex } });
 	}
 
-	const rows = await brain.search(collectionName(), {
+	const rows = await brain.search(collectionName(options?.workspaceId), {
 		vector,
 		limit,
 		filter: must.length > 0 ? { must } : undefined

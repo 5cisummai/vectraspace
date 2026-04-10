@@ -4,6 +4,7 @@
 	import HomeIcon from '@lucide/svelte/icons/home';
 	import MagnifyingGlassIcon from '@lucide/svelte/icons/search';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
+	import FolderCogIcon from '@lucide/svelte/icons/folder-cog';
 
 	const navMain = [
 		{
@@ -26,6 +27,11 @@
 			icon: MagnifyingGlassIcon,
 		},
 		{
+			title: 'Workspace',
+			href: '/workspace',
+			icon: FolderCogIcon,
+		},
+		{
 			title: 'Settings',
 			href: '/settings',
 			icon: SettingsIcon,
@@ -36,6 +42,7 @@
 <script lang="ts">
 	import NavMain from './nav-main.svelte';
 	import NavUser from './nav-user.svelte';
+	import WorkspaceSwitcher from './workspace-switcher.svelte';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 	import { browser } from '$app/environment';
 	import type { ComponentProps } from 'svelte';
@@ -65,6 +72,7 @@
 				</div>
 			</Sidebar.MenuItem>
 		</Sidebar.Menu>
+		<WorkspaceSwitcher />
 	</Sidebar.Header>
 	<Sidebar.Content>
 		<NavMain items={[...navMain]} />

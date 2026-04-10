@@ -35,7 +35,8 @@ export interface IngestSummary extends IngestCounters {
 	collection: string;
 }
 
-function collectionName(): string {
+function collectionName(workspaceId?: string): string {
+	if (workspaceId) return `ws_${workspaceId}_ingest`;
 	return env.QDRANT_INGEST_COLLECTION ?? 'media_ingest';
 }
 
@@ -89,7 +90,7 @@ async function walkDirectory(relativePath: string): Promise<string[]> {
 	return files;
 }
 
-async function ingestOneFile(relativePath: string): Promise<IngestFileResult> {
+async function ingestOneFile(relativePath: string, workspaceId?: string): Promise<IngestFileResult> {
 	const resolved = resolveSafePath(relativePath);
 	if (!resolved) {
 		return { path: relativePath, status: 'skipped', chunksIndexed: 0, reason: 'Invalid path' };
@@ -150,16 +151,16 @@ async function ingestOneFile(relativePath: string): Promise<IngestFileResult> {
 		points.push({ id: pointId, vector, payload });
 	}
 
-	await brain.ensureCollection(collectionName(), points[0].vector.length);
+	await brain.ensureCollection(collectionName(workspaceId), points[0].vector.length);
 
 	for (let i = 0; i < points.length; i += UPSERT_BATCH_SIZE) {
-		await brain.upsertPoints(collectionName(), points.slice(i, i + UPSERT_BATCH_SIZE));
+		await brain.upsertPoints(collectionName(workspaceId), points.slice(i, i + UPSERT_BATCH_SIZE));
 	}
 
 	return { path: relativePath, status: 'indexed', chunksIndexed: points.length };
 }
 
-export async function ingestFileByRelativePath(relativePath: string): Promise<IngestSummary> {
+export async function ingestFileByRelativePath(relativePath: string, workspaceId?: string): Promise<IngestSummary> {
 	const counters: IngestCounters = {
 		filesScanned: 1,
 		filesIndexed: 0,
@@ -169,7 +170,7 @@ export async function ingestFileByRelativePath(relativePath: string): Promise<In
 	};
 
 	try {
-		const result = await ingestOneFile(relativePath);
+		const result = await ingestOneFile(relativePath, workspaceId);
 		if (result.status === 'indexed') {
 			counters.filesIndexed++;
 			counters.chunksIndexed += result.chunksIndexed;
@@ -185,12 +186,12 @@ export async function ingestFileByRelativePath(relativePath: string): Promise<In
 	}
 
 	return {
-		collection: collectionName(),
+		collection: collectionName(workspaceId),
 		...counters
 	};
 }
 
-export async function ingestDirectoryByRootIndex(rootIndex: number): Promise<IngestSummary> {
+export async function ingestDirectoryByRootIndex(rootIndex: number, workspaceId?: string): Promise<IngestSummary> {
 	const roots = getMediaRoots();
 	if (!Number.isInteger(rootIndex) || rootIndex < 0 || rootIndex >= roots.length) {
 		throw new Error('Invalid rootIndex');
@@ -208,7 +209,7 @@ export async function ingestDirectoryByRootIndex(rootIndex: number): Promise<Ing
 
 	for (const filePath of allFiles) {
 		try {
-			const result = await ingestOneFile(filePath);
+			const result = await ingestOneFile(filePath, workspaceId);
 			if (result.status === 'indexed') {
 				counters.filesIndexed++;
 				counters.chunksIndexed += result.chunksIndexed;
@@ -225,7 +226,7 @@ export async function ingestDirectoryByRootIndex(rootIndex: number): Promise<Ing
 	}
 
 	return {
-		collection: collectionName(),
+		collection: collectionName(workspaceId),
 		...counters
 	};
 }

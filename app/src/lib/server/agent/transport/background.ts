@@ -6,15 +6,15 @@ import { env } from '$env/dynamic/private';
 import { runAgentLoop } from '../loop';
 import { saveAssistantMessage } from '$lib/server/chat-store';
 import {
-	createBackgroundRun,
+	createAgentRun,
 	markRunRunning,
 	markRunDone,
 	markRunFailed,
 	markRunAwaitingConfirmation,
 	appendRunToolStreamEvent,
 	supersedeOtherRunsForChat,
-	type BackgroundRunRecord
-} from '$lib/server/background-agent-runs';
+	appendRunStep
+} from '$lib/server/agent-runs';
 import type { AgentContext } from '../context';
 import type { AgentRequest, AgentEvent } from '../types';
 import { errorMessage } from '../errors';
@@ -27,10 +27,10 @@ export interface BackgroundRunResult {
 }
 
 /**
- * Start a background agent run. Returns immediately with the run ID.
- * The agent loop executes asynchronously; the client polls for status.
+ * Start a background agent run. Creates the DB record, then executes
+ * the agent loop asynchronously. Returns the run ID for polling.
  */
-export function startBackgroundRun(
+export async function startBackgroundRun(
 	request: AgentRequest,
 	ctx: AgentContext,
 	opts: {
@@ -38,25 +38,38 @@ export function startBackgroundRun(
 		kind: 'ask' | 'confirm';
 		savedUserMessageId?: string | null;
 	}
-): BackgroundRunResult {
-	const run = createBackgroundRun(ctx.userId, opts.chatId, opts.kind);
-	// Continuation replaces the run that was waiting on confirmation — retire it so polls/active
-	// lookup cannot surface a stale awaiting_confirmation row.
+): Promise<BackgroundRunResult> {
+	const run = await createAgentRun(ctx.userId, opts.chatId, opts.kind, ctx.workspaceId);
+
+	// Continuation replaces the run that was waiting on confirmation — retire stale runs
 	if (opts.kind === 'confirm') {
-		supersedeOtherRunsForChat(ctx.userId, opts.chatId, run.id);
+		await supersedeOtherRunsForChat(ctx.userId, opts.chatId, run.id);
 	}
 
 	// Fire-and-forget async execution
 	void (async () => {
-		markRunRunning(run.id);
+		await markRunRunning(run.id);
 
-		// Wire up tool stream events → background run log
 		const ctxWithEvents: AgentContext = {
 			...ctx,
 			onEvent(event: AgentEvent) {
 				ctx.onEvent?.(event);
 				if (event.type === 'tool_start' || event.type === 'tool_done') {
 					appendRunToolStreamEvent(run.id, { type: event.type, tool: event.tool });
+				}
+				if (event.type === 'tool_start') {
+					void appendRunStep(run.id, {
+						type: 'tool_call',
+						timestamp: new Date().toISOString(),
+						data: { tool: event.tool, args: event.args }
+					});
+				}
+				if (event.type === 'tool_done') {
+					void appendRunStep(run.id, {
+						type: 'tool_result',
+						timestamp: new Date().toISOString(),
+						data: { tool: event.tool, resultSummary: event.resultSummary }
+					});
 				}
 			}
 		};
@@ -65,7 +78,7 @@ export function startBackgroundRun(
 			const outcome = await runAgentLoop(request, ctxWithEvents);
 
 			if (outcome.kind === 'pending_confirmation') {
-				markRunAwaitingConfirmation(run.id, {
+				await markRunAwaitingConfirmation(run.id, {
 					pendingId: outcome.pendingId,
 					tool: outcome.tool,
 					args: outcome.args,
@@ -85,18 +98,18 @@ export function startBackgroundRun(
 				model,
 				iterations: outcome.iterations
 			});
-			markRunDone(run.id);
+			await markRunDone(run.id);
 		} catch (err) {
 			const message = errorMessage(err);
 			ctx.logger.error('background_run.failed', { runId: run.id, error: message });
-			markRunFailed(run.id, message);
+			await markRunFailed(run.id, message);
 		}
 	})();
 
 	return {
 		chatId: opts.chatId,
 		runId: run.id,
-		status: run.status,
+		status: 'queued',
 		...(opts.savedUserMessageId ? { userMessageId: opts.savedUserMessageId } : {})
 	};
 }

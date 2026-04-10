@@ -35,11 +35,12 @@ export const searchTool: ToolDefinition = {
 	requiresConfirmation: false,
 	hasSideEffects: false,
 
-	async handler(args): Promise<ToolResult> {
+	async handler(args, ctx): Promise<ToolResult> {
 		const query = asString(args.query) ?? '';
 		if (!query.trim()) return { output: 'Error: search requires a non-empty "query" string.' };
 
 		const results = await semanticSearch(query, {
+			workspaceId: ctx?.workspaceId,
 			mediaType: asMediaType(args.mediaType),
 			rootIndex: asNumber(args.rootIndex),
 			limit: Math.max(1, Math.min(Math.floor(asNumber(args.limit) ?? 8), 24)),

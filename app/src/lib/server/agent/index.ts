@@ -49,11 +49,12 @@ function getModel(): string {
 	return env.LLM_MODEL ?? 'llama3.2';
 }
 
-function makeContext(config: { userId: string; isAdmin: boolean; chatId: string }, logger: AgentLogger, filters?: import('./types').AskFilters): AgentContext {
+function makeContext(config: { userId: string; isAdmin: boolean; chatId: string; workspaceId?: string }, logger: AgentLogger, filters?: import('./types').AskFilters): AgentContext {
 	return {
 		userId: config.userId,
 		chatId: config.chatId,
-		toolExec: { userId: config.userId, isAdmin: config.isAdmin },
+		workspaceId: config.workspaceId,
+		toolExec: { userId: config.userId, isAdmin: config.isAdmin, workspaceId: config.workspaceId },
 		registry,
 		filters: normalizeFilters(filters),
 		logger
@@ -114,7 +115,7 @@ export async function runAgent(
 		};
 	}
 
-	const ctx = makeContext({ userId: config.userId, isAdmin: config.isAdmin, chatId }, logger, filters);
+	const ctx = makeContext({ userId: config.userId, isAdmin: config.isAdmin, chatId, workspaceId: config.workspaceId }, logger, filters);
 
 	logger.info('agent.run', { chatId, mode: config.mode, regenerate: !!config.regenerate });
 
@@ -185,7 +186,7 @@ export async function confirmTool(config: ConfirmRunConfig): Promise<Response> {
 
 	const chatId = taken.chatSessionId;
 	const ctx = makeContext(
-		{ userId: config.userId, isAdmin: config.isAdmin, chatId },
+		{ userId: config.userId, isAdmin: config.isAdmin, chatId, workspaceId: config.workspaceId },
 		logger,
 		bodyForAgent.continuation!.filters
 	);
@@ -207,7 +208,7 @@ async function dispatch(
 ): Promise<Response> {
 	// ---- Background ----
 	if (mode === 'background') {
-		const result = startBackgroundRun(request, ctx, {
+		const result = await startBackgroundRun(request, ctx, {
 			chatId: opts.chatId,
 			kind: opts.kind,
 			savedUserMessageId: opts.savedUserMessageId

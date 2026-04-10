@@ -18,6 +18,8 @@ export interface AgentContext {
 	/** Authenticated user info for tool permission checks. */
 	userId: string;
 	chatId: string;
+	/** Workspace scope for this run. When set, all tools and searches are scoped. */
+	workspaceId?: string;
 	toolExec: ToolExecutionContext;
 
 	/** Registered tools available to the LLM. */

@@ -6,11 +6,14 @@ import type { LlmToolDefinition } from '$lib/server/services/llm';
 
 /**
  * Context passed to every tool handler at execution time.
- * Contains the authenticated user info needed for permission checks.
+ * Contains the authenticated user info and workspace scope needed
+ * for permission checks and workspace-scoped operations.
  */
 export interface ToolExecutionContext {
 	userId: string;
 	isAdmin: boolean;
+	/** When set, tools operate within this workspace's scope. */
+	workspaceId?: string;
 }
 
 /**

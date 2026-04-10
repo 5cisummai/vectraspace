@@ -5,12 +5,28 @@
 	import { Separator } from '$lib/components/ui/separator/index.js';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 	import { agentSessions } from '$lib/hooks/agent-sessions.svelte';
+	import { workspaceStore } from '$lib/hooks/workspace.svelte';
 
 	let { children, data } = $props();
 
 	// Cookie-backed default for SSR/hydration; toggles update via bind:open + cookie.
 	// svelte-ignore state_referenced_locally
 	let sidebarOpen = $state(data.sidebarOpen);
+
+	// Seed workspace store from server-loaded data
+	$effect(() => {
+		if (data.workspaces?.length) {
+			workspaceStore.workspaces = data.workspaces as any;
+			if (typeof window !== 'undefined') {
+				const saved = localStorage.getItem('activeWorkspaceId');
+				if (saved && data.workspaces.some((w: any) => w.id === saved)) {
+					workspaceStore.activeId = saved;
+				} else {
+					workspaceStore.activeId = data.workspaces[0].id;
+				}
+			}
+		}
+	});
 
 	onMount(() => {
 		agentSessions.connect();

@@ -2,6 +2,7 @@ import { error } from '@sveltejs/kit';
 import { confirmTool } from '$lib/server/agent';
 import { normalizeAutoApproveToolNames } from '$lib/server/agent/auto-approve-tools';
 import type { TransportMode } from '$lib/server/agent/types';
+import { ensureDefaultWorkspaceMembership } from '$lib/server/services/workspace';
 import type { RequestHandler } from './$types';
 
 interface ConfirmBody {
@@ -26,6 +27,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 	const autoApproveToolNames = normalizeAutoApproveToolNames(body.autoApproveToolNames);
 
+	// Legacy route: auto-resolve to default workspace for backward compat
+	const workspaceId = await ensureDefaultWorkspaceMembership(user.id);
+
 	return confirmTool({
 		userId: user.id,
 		isAdmin: user.role === 'ADMIN',
@@ -33,6 +37,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		approved: body.approved,
 		chatId: body.chatId,
 		mode,
-		autoApproveToolNames
+		autoApproveToolNames,
+		workspaceId
 	});
 };

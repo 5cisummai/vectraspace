@@ -2,7 +2,7 @@
 // agent/tools/metadata.ts — Metadata-only search tool
 // ---------------------------------------------------------------------------
 
-import { env } from '$env/dynamic/private';
+import { collectionName as semanticCollectionName } from '$lib/server/semantic';
 import type { SearchResult } from '$lib/server/semantic';
 import { brain } from '$lib/server/services/vectordb';
 import type { ToolDefinition, ToolResult } from './types';
@@ -34,7 +34,7 @@ export const searchByMetadataTool: ToolDefinition = {
 	requiresConfirmation: false,
 	hasSideEffects: false,
 
-	async handler(args): Promise<ToolResult> {
+	async handler(args, ctx): Promise<ToolResult> {
 		const mediaType = asMediaType(args.mediaType);
 		const rootIndex = asNumber(args.rootIndex);
 		const pathContains = (asString(args.path_contains) ?? '').toLowerCase().trim() || undefined;
@@ -43,7 +43,7 @@ export const searchByMetadataTool: ToolDefinition = {
 		if (mediaType) must.push({ key: 'mediaType', match: { value: mediaType } });
 		if (typeof rootIndex === 'number') must.push({ key: 'rootIndex', match: { value: rootIndex } });
 
-		const collection = env.QDRANT_COLLECTION ?? 'media_semantic';
+		const collection = semanticCollectionName(ctx?.workspaceId);
 		const filtered: SearchResult[] = [];
 		let offset: string | number | null = null;
 		let passes = 0;

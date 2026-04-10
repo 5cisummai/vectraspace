@@ -2,6 +2,7 @@ import { error } from '@sveltejs/kit';
 import { runAgent } from '$lib/server/agent';
 import { normalizeAutoApproveToolNames } from '$lib/server/agent/auto-approve-tools';
 import type { TransportMode } from '$lib/server/agent/types';
+import { ensureDefaultWorkspaceMembership } from '$lib/server/services/workspace';
 import type { RequestHandler } from './$types';
 
 interface AskRequestBody {
@@ -36,6 +37,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 	const autoApproveToolNames = normalizeAutoApproveToolNames(body.autoApproveToolNames);
 
+	// Legacy route: auto-resolve to default workspace for backward compat
+	const workspaceId = await ensureDefaultWorkspaceMembership(user.id);
+
 	return runAgent(body.question ?? '', {
 		userId: user.id,
 		isAdmin: user.role === 'ADMIN',
@@ -43,6 +47,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		mode,
 		regenerate,
 		maxHistoryMessages: maxHistory,
-		autoApproveToolNames
+		autoApproveToolNames,
+		workspaceId
 	}, body.filters as import('$lib/server/agent/types').AskFilters | undefined);
 };

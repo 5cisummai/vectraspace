@@ -1,5 +1,5 @@
 import { error, json } from '@sveltejs/kit';
-import { getActiveBackgroundRunForChat } from '$lib/server/background-agent-runs';
+import { getActiveRunForChat, toApiStatus } from '$lib/server/agent-runs';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ locals, url }) => {
@@ -8,7 +8,7 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 	const chatId = url.searchParams.get('chatId')?.trim();
 	if (!chatId) throw error(400, 'chatId is required');
 
-	const run = getActiveBackgroundRunForChat(locals.user.id, chatId);
+	const run = await getActiveRunForChat(chatId, locals.user.id);
 	if (!run) {
 		return json({ run: null });
 	}
@@ -18,7 +18,7 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 			id: run.id,
 			chatId: run.chatId,
 			kind: run.kind,
-			status: run.status,
+			status: toApiStatus(run.status),
 			error: run.error ?? null,
 			pendingToolConfirmation: run.pendingToolConfirmation ?? null,
 			toolStreamLog: run.toolStreamLog ?? [],

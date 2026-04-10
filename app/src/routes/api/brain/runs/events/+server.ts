@@ -1,5 +1,5 @@
 import { error } from '@sveltejs/kit';
-import { subscribeRunStatus, type BackgroundRunStatus } from '$lib/server/background-agent-runs';
+import { subscribeRunStatus, type ApiRunStatus } from '$lib/server/agent-runs';
 import type { RequestHandler } from './$types';
 
 /**
@@ -17,7 +17,7 @@ export const GET: RequestHandler = async ({ locals, request }) => {
 
 	const body = new ReadableStream<Uint8Array>({
 		start(controller) {
-			function send(chatId: string, status: BackgroundRunStatus) {
+			function send(chatId: string, status: ApiRunStatus) {
 				try {
 					controller.enqueue(
 						enc.encode(`data: ${JSON.stringify({ chatId, status })}\n\n`)

@@ -127,6 +127,8 @@ export interface AgentRunConfig {
 	userId: string;
 	isAdmin: boolean;
 	chatId?: string;
+	/** Workspace scope for this run. */
+	workspaceId?: string;
 	mode: TransportMode;
 	/** When true, replay the last user message instead of appending a new one. */
 	regenerate?: boolean;
@@ -142,6 +144,8 @@ export interface ConfirmRunConfig {
 	pendingId: string;
 	approved: boolean;
 	chatId?: string;
+	/** Workspace scope for this run. */
+	workspaceId?: string;
 	mode: TransportMode;
 	/** Same as AgentRunConfig — forwarded so resumed runs honor auto-approve for later tools. */
 	autoApproveToolNames?: string[];
