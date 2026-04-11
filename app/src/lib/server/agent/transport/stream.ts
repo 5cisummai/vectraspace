@@ -66,6 +66,13 @@ export function buildStreamResponse(
 									...(event.resultSummary !== undefined ? { resultSummary: event.resultSummary } : {})
 								});
 								break;
+							case 'tool_thinking':
+								writeLine({
+									type: 'tool_thinking',
+									tool: event.tool,
+									thinking: event.thinking
+								});
+								break;
 							case 'confirmation_required':
 								writeLine({
 									type: 'tool_confirmation_required',

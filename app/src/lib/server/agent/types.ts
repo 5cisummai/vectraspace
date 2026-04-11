@@ -100,6 +100,7 @@ export interface AgentPendingConfirmation {
 export type AgentEvent =
 	| { type: 'tool_start'; tool: string; args?: Record<string, unknown> }
 	| { type: 'tool_done'; tool: string; resultSummary?: string }
+	| { type: 'tool_thinking'; tool: string; thinking: string }
 	| { type: 'token'; text: string }
 	| { type: 'meta'; payload: AgentMetaPayload }
 	| { type: 'confirmation_required'; pendingId: string; tool: string; args: Record<string, unknown>; toolCallId: string; chatId: string }

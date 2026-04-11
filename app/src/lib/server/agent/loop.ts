@@ -243,6 +243,16 @@ export async function runAgentLoop(
 			});
 		}
 
+		// ---- Emit model's reasoning text before tool execution ----
+		const rawMsg =
+			result.rawMessage && typeof result.rawMessage === 'object'
+				? (result.rawMessage as { content?: unknown })
+				: {};
+		const thinking = typeof rawMsg.content === 'string' ? rawMsg.content.trim() : '';
+		if (thinking) {
+			ctx.onEvent?.({ type: 'tool_thinking', tool: result.toolName, thinking });
+		}
+
 		// ---- Execute the tool ----
 		ctx.onEvent?.({ type: 'tool_start', tool: result.toolName, args: effectiveArgs });
 

@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises';
-import path from 'node:path';
+import * as path from '$lib/server/paths';
 import { db } from '$lib/server/db';
 import { deleteSemanticEntryByRelativePath } from '$lib/server/semantic';
 import { resolveSafePath } from '$lib/server/services/storage';
@@ -18,7 +18,7 @@ async function collectNestedRelativePaths(fullPath: string, relativePath: string
 	const nested = await Promise.all(
 		dirents.map(async (dirent) => {
 			const childFull = path.join(fullPath, dirent.name);
-			const childRel = path.join(relativePath, dirent.name).split(path.sep).join('/');
+			const childRel = path.join(relativePath, dirent.name);
 			return collectNestedRelativePaths(childFull, childRel);
 		})
 	);
@@ -237,7 +237,7 @@ export async function moveManyMediaPaths(
 	let failureCount = 0;
 
 	for (const source of normalizedSources) {
-		const leafName = path.posix.basename(source);
+		const leafName = path.basename(source);
 		const destinationPath = baseDir.length > 0 ? `${baseDir}/${leafName}` : leafName;
 		const result = await moveMediaPath(source, destinationPath, ctx);
 		itemResults.push(`- ${source} -> ${destinationPath}: ${result}`);

@@ -1,7 +1,7 @@
 import { env } from '$env/dynamic/private';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
-import path from 'node:path';
+import * as path from '$lib/server/paths';
 
 export type EmbeddingProvider = 'multimodal' | 'ollama' | 'openai';
 

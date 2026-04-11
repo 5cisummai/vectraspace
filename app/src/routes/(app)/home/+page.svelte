@@ -51,7 +51,7 @@
 		'What files are in my library?',
 		'Find all video files',
 		'Organize my music by artist',
-		'Show me recently added files',
+		'Show me recently added files'
 	];
 
 	// ── Recent agent sessions ─────────────────────────────────────────────────
@@ -95,7 +95,7 @@
 	}
 
 	function openNewAgent() {
-		// eslint-disable-next-line svelte/no-navigation-without-restore
+		// eslint-disable-next-line svelte/no-navigation-without-resolve
 		goto(`/chat`);
 	}
 
@@ -114,7 +114,8 @@
 		return nodes.map((node, index) => {
 			const name = node.name ?? node.title ?? `Item ${index + 1}`;
 			const path = node.path ?? name;
-			const isDirectory = node.type === 'directory' || node.type === 'folder' || !!node.children?.length;
+			const isDirectory =
+				node.type === 'directory' || node.type === 'folder' || !!node.children?.length;
 			return {
 				id: path,
 				name,
@@ -140,10 +141,10 @@
 
 	const mediaSections = $derived<MediaSection[]>([
 		{
-			title: 'Videos',
-			empty: 'No videos found.',
-			aria: 'Videos',
-			files: allEntries.filter((e) => e.type === 'file' && VIDEO_RE.test(e.path ?? e.name))
+			title: 'Documents',
+			empty: 'No documents found.',
+			aria: 'Documents',
+			files: allEntries.filter((e) => e.type === 'file' && DOC_RE.test(e.path ?? e.name))
 		},
 		{
 			title: 'Images',
@@ -152,16 +153,16 @@
 			files: allEntries.filter((e) => e.type === 'file' && IMAGE_RE.test(e.path ?? e.name))
 		},
 		{
+			title: 'Videos',
+			empty: 'No videos found.',
+			aria: 'Videos',
+			files: allEntries.filter((e) => e.type === 'file' && VIDEO_RE.test(e.path ?? e.name))
+		},
+		{
 			title: 'Audio',
 			empty: 'No audio files found.',
 			aria: 'Audio files',
 			files: allEntries.filter((e) => e.type === 'file' && AUDIO_RE.test(e.path ?? e.name))
-		},
-		{
-			title: 'Documents',
-			empty: 'No documents found.',
-			aria: 'Documents',
-			files: allEntries.filter((e) => e.type === 'file' && DOC_RE.test(e.path ?? e.name))
 		}
 	]);
 
@@ -177,26 +178,28 @@
 	}
 </script>
 
-<div class="min-h-full bg-background text-foreground">
-	<main class="mx-auto flex w-full max-w-4xl flex-col gap-10 px-4 py-10 sm:px-6">
-
+<div class="min-h-full min-w-0 bg-background text-foreground">
+	<main class="mx-auto flex w-full min-w-0 max-w-4xl flex-col gap-10 px-4 py-10 sm:px-6">
 		<!-- ── Hero / Composer ─────────────────────────────────────────────── -->
-		<section class="flex flex-col items-center gap-6 text-center">
+		<section class="flex min-w-0 flex-col items-center gap-6 text-center">
 			<div class="flex flex-col gap-1">
 				<p class="text-sm text-muted-foreground">
 					{greeting()}{username ? `, ${username}` : ''}
 				</p>
-				<h1 class="text-3xl font-semibold tracking-tight sm:text-4xl">
-					What can I help with?
-				</h1>
+				<h1 class="text-3xl font-semibold tracking-tight sm:text-4xl">What can I help with?</h1>
 			</div>
 
 			<!-- Composer -->
 			<form
-				onsubmit={(e) => { e.preventDefault(); submitComposer(); }}
+				onsubmit={(e) => {
+					e.preventDefault();
+					submitComposer();
+				}}
 				class="w-full max-w-2xl"
 			>
-				<div class="flex items-end gap-2 rounded-2xl border border-border bg-muted/20 px-3 py-2 shadow-sm transition-shadow focus-within:shadow-md focus-within:ring-1 focus-within:ring-ring/40">
+				<div
+					class="flex items-end gap-2 rounded-2xl border border-border bg-muted/20 px-3 py-2 shadow-sm transition-shadow focus-within:shadow-md focus-within:ring-1 focus-within:ring-ring/40"
+				>
 					<Textarea
 						bind:ref={textareaEl}
 						bind:value={composerValue}
@@ -209,7 +212,7 @@
 						}}
 						placeholder="Ask anything about your media library…"
 						rows={1}
-						class="flex-1 resize-none border-0 bg-transparent! shadow-none focus-visible:ring-0 max-h-48"
+						class="max-h-48 flex-1 resize-none border-0 bg-transparent! shadow-none focus-visible:ring-0"
 					/>
 					<Button
 						type="submit"
@@ -228,7 +231,10 @@
 				{#each suggestions as s (s)}
 					<button
 						type="button"
-						onclick={() => { composerValue = s; submitComposer(); }}
+						onclick={() => {
+							composerValue = s;
+							submitComposer();
+						}}
 						class="rounded-full border border-border bg-background px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
 					>
 						{s}
@@ -238,8 +244,8 @@
 		</section>
 
 		<!-- ── Recent agent sessions ────────────────────────────────────────── -->
-		<section class="flex flex-col gap-4">
-			<div class="flex items-center justify-between">
+		<section class="flex min-w-0 flex-col gap-4">
+			<div class="flex min-w-0 items-center justify-between gap-2">
 				<h2 class="text-sm font-semibold">Recent sessions</h2>
 				<Button variant="ghost" size="sm" class="gap-1.5 text-xs" onclick={openNewAgent}>
 					<BotIcon class="size-3.5" />
@@ -260,7 +266,9 @@
 						</div>
 						<div class="flex flex-col gap-1">
 							<p class="text-sm font-medium">No agent sessions yet</p>
-							<p class="text-xs text-muted-foreground">Ask a question above to start your first session.</p>
+							<p class="text-xs text-muted-foreground">
+								Ask a question above to start your first session.
+							</p>
 						</div>
 					</Card.Content>
 				</Card.Root>
@@ -270,7 +278,9 @@
 						<AgentStatusItem
 							chatId={agent.id}
 							name={agent.title || 'Agent session'}
-							description="{agent.messageCount} message{agent.messageCount === 1 ? '' : 's'} · {relativeTimestamp(agent.updatedAt)}"
+							description="{agent.messageCount} message{agent.messageCount === 1
+								? ''
+								: 's'} · {relativeTimestamp(agent.updatedAt)}"
 							href="/chat?agent={encodeURIComponent(agent.id)}"
 							size="sm"
 						/>
@@ -285,9 +295,9 @@
 		</section>
 
 		<!-- ── Media library ────────────────────────────────────────────────── -->
-		<section class="flex flex-col gap-6">
-			<div class="flex items-center justify-between">
-				<h2 class="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Library</h2>
+		<section class="flex min-w-0 flex-col gap-6">
+			<div class="flex min-w-0 items-center justify-between gap-2">
+				<h2 class="text-sm font-semibold tracking-wide text-muted-foreground uppercase">Library</h2>
 				<Button
 					variant="ghost"
 					size="sm"
@@ -303,17 +313,17 @@
 				<p class="text-sm text-muted-foreground">No media files indexed yet.</p>
 			{:else}
 				{#each mediaSections.filter((s) => s.files.length > 0) as s (s.title)}
-					<div class="flex flex-col gap-3">
+					<div class="flex min-w-0 flex-col gap-3">
 						<h3 class="text-sm font-medium">{s.title}</h3>
 						<div
-							class="-mx-1 flex snap-x snap-mandatory gap-3 overflow-x-auto overflow-y-visible px-1 pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden mask-[linear-gradient(to_right,black_calc(100%-2.5rem),transparent)] sm:mask-none"
+							class="-mx-1 flex min-w-0 w-full snap-x snap-mandatory gap-3 overflow-x-auto overflow-y-visible mask-[linear-gradient(to_right,black_calc(100%-2.5rem),transparent)] px-1 pb-1 [-ms-overflow-style:none] [scrollbar-width:none] sm:mask-none [&::-webkit-scrollbar]:hidden"
 							role="region"
 							aria-label={s.aria}
 						>
 							{#each s.files as entry (entry.path)}
 								<button
 									type="button"
-									class="w-36 shrink-0 snap-start rounded-lg text-left outline-none ring-offset-background transition hover:opacity-95 focus-visible:ring-2 focus-visible:ring-ring"
+									class="w-36 shrink-0 snap-start rounded-lg text-left ring-offset-background transition outline-none hover:opacity-95 focus-visible:ring-2 focus-visible:ring-ring"
 									onclick={() => openInBrowser(entry.path)}
 								>
 									<FilePreviewTile
@@ -332,6 +342,5 @@
 				{/each}
 			{/if}
 		</section>
-
 	</main>
 </div>

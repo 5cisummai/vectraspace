@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises';
-import path from 'node:path';
+import * as path from '$lib/server/paths';
 import { env } from '$env/dynamic/private';
 import { getMediaInfo, type MediaEntry, type MediaType } from '$lib/server/services/storage';
 

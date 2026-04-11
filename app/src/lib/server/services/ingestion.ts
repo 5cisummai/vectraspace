@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import type { Dirent } from 'node:fs';
-import path from 'node:path';
+import * as path from '$lib/server/paths';
 import { env } from '$env/dynamic/private';
 import { brain, type BrainPoint } from '$lib/server/services/vectordb';
 import { createPointId, embedText } from '$lib/server/services/embedding';
@@ -77,7 +77,7 @@ async function walkDirectory(relativePath: string): Promise<string[]> {
 	for (const dirent of dirents) {
 		if (dirent.name.startsWith('.')) continue;
 
-		const child = path.posix.join(relativePath, dirent.name);
+		const child = path.join(relativePath, dirent.name);
 		if (dirent.isDirectory()) {
 			files.push(...(await walkDirectory(child)));
 			continue;

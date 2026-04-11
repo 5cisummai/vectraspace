@@ -34,9 +34,18 @@
 	let input = $state('');
 	let loading = $state(false);
 	let error = $state<string | null>(null);
-	type ToolActionStep = { label: string; done: boolean };
+	type ToolActionStep = {
+		label: string;
+		toolName: string;
+		args?: Record<string, unknown>;
+		thinking?: string;
+		done: boolean;
+		expanded: boolean;
+	};
 
 	let streamingToolSteps = $state<ToolActionStep[]>([]);
+	/** Holds the model's reasoning text emitted just before a tool_start event. */
+	let pendingThinking = $state<string>('');
 	let pendingToolConfirmation = $state<PendingToolConfirmation | null>(null);
 	let scrollEl = $state<HTMLElement | null>(null);
 	let loadingConversation = $state(false);
@@ -116,7 +125,7 @@
 		const steps: ToolActionStep[] = [];
 		for (const e of events) {
 			if (e.type === 'tool_start' && typeof e.tool === 'string') {
-				steps.push({ label: toolLabelForName(e.tool), done: false });
+				steps.push({ label: toolLabelForName(e.tool), toolName: e.tool, done: false, expanded: false });
 			} else if (e.type === 'tool_done' && typeof e.tool === 'string') {
 				for (let i = steps.length - 1; i >= 0; i--) {
 					if (!steps[i].done) {
@@ -129,8 +138,18 @@
 		return steps;
 	}
 
-	function pushToolStart(name: string) {
-		streamingToolSteps = [...streamingToolSteps, { label: toolLabelForName(name), done: false }];
+	function pushToolStart(name: string, args?: Record<string, unknown>, thinking?: string) {
+		streamingToolSteps = [
+			...streamingToolSteps,
+			{ label: toolLabelForName(name), toolName: name, args, thinking, done: false, expanded: false }
+		];
+		pendingThinking = '';
+	}
+
+	function toggleStepExpanded(stepIndex: number) {
+		streamingToolSteps = streamingToolSteps.map((s, i) =>
+			i === stepIndex ? { ...s, expanded: !s.expanded } : s
+		);
 	}
 
 	function markLastToolDone() {
@@ -230,6 +249,7 @@
 		backgroundRunId = null;
 		loading = false;
 		streamingToolSteps = [];
+		pendingThinking = '';
 		activeAgentStatus = 'done';
 	}
 
@@ -406,7 +426,16 @@
 		}
 
 		if (obj.type === 'tool_start' && typeof obj.tool === 'string') {
-			pushToolStart(obj.tool);
+			const args =
+				obj.args && typeof obj.args === 'object' && !Array.isArray(obj.args)
+					? (obj.args as Record<string, unknown>)
+					: undefined;
+			pushToolStart(obj.tool, args, pendingThinking || undefined);
+			return { assistantId, assistantContent, pendingMeta };
+		}
+
+		if (obj.type === 'tool_thinking' && typeof obj.tool === 'string' && typeof obj.thinking === 'string') {
+			pendingThinking = obj.thinking;
 			return { assistantId, assistantContent, pendingMeta };
 		}
 
@@ -603,6 +632,7 @@
 		activeAgentStatus = 'working';
 		error = null;
 		streamingToolSteps = [];
+		pendingThinking = '';
 		pendingToolConfirmation = null;
 
 		agentRunAbortController?.abort();
@@ -632,27 +662,29 @@
 				);
 			}
 
-			const payload = (await response.json()) as {
-				chatId: string;
-				runId: string;
-				status: BackgroundRunStatus;
-			};
-			if (!payload.runId || !payload.chatId) {
-				throw new Error('Invalid background run response');
+			const result = await response.json() as { chatId: string; runId: string; userMessageId?: string };
+			// Update the optimistic user message with the real server-assigned ID
+			if (result.userMessageId) {
+				const lastUserIdx = messages.findLastIndex(m => m.role === 'user');
+				if (lastUserIdx !== -1) {
+					messages = messages.map((m, i) => i === lastUserIdx ? { ...m, id: result.userMessageId! } : m);
+				}
 			}
-			await beginBackgroundRunTracking(payload.runId, payload.chatId);
+			await beginBackgroundRunTracking(result.runId, result.chatId);
 			onListRefresh?.();
 		} catch (err) {
 			if (isAbortError(err)) {
 				loading = false;
 				activeAgentStatus = 'done';
 				streamingToolSteps = [];
+				pendingThinking = '';
 				agentRunAbortController = null;
 				return;
 			}
 			loading = false;
 			activeAgentStatus = 'done';
 			streamingToolSteps = [];
+			pendingThinking = '';
 			agentRunAbortController = null;
 			const msg = err instanceof Error ? err.message : 'An error occurred';
 			error = msg;
@@ -692,6 +724,7 @@
 		activeAgentStatus = 'working';
 		error = null;
 		streamingToolSteps = [];
+		pendingThinking = '';
 		pendingToolConfirmation = null;
 
 		agentRunAbortController?.abort();
@@ -719,27 +752,22 @@
 				);
 			}
 
-			const payload = (await response.json()) as {
-				chatId: string;
-				runId: string;
-				status: BackgroundRunStatus;
-			};
-			if (!payload.runId || !payload.chatId) {
-				throw new Error('Invalid background run response');
-			}
-			await beginBackgroundRunTracking(payload.runId, payload.chatId);
+			const result = await response.json() as { chatId: string; runId: string };
+			await beginBackgroundRunTracking(result.runId, result.chatId);
 			onListRefresh?.();
 		} catch (err) {
 			if (isAbortError(err)) {
 				loading = false;
 				activeAgentStatus = 'done';
 				streamingToolSteps = [];
+				pendingThinking = '';
 				agentRunAbortController = null;
 				return;
 			}
 			loading = false;
 			activeAgentStatus = 'done';
 			streamingToolSteps = [];
+			pendingThinking = '';
 			agentRunAbortController = null;
 			error = err instanceof Error ? err.message : 'An error occurred';
 		}
@@ -1096,18 +1124,40 @@
 				{/if}
 
 				{#if streamingToolSteps.length > 0}
-					<ul class="mt-2 space-y-1.5 pl-1" aria-live="polite" aria-label="Tool activity">
+					<ul class="mt-2 space-y-1" aria-live="polite" aria-label="Tool activity">
 						{#each streamingToolSteps as step, stepIndex (stepIndex)}
-							<li class="flex items-center gap-2 text-xs text-muted-foreground">
-								{#if step.done}
-									<span class="text-emerald-600 dark:text-emerald-400" aria-hidden="true">✓</span>
-								{:else}
-									<span
-										class="inline-block size-1.5 shrink-0 animate-pulse rounded-full bg-muted-foreground/70"
-										aria-hidden="true"
-									></span>
+							<li class="flex flex-col">
+								<button
+									type="button"
+									class="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors w-fit rounded px-0.5 -mx-0.5 group"
+									onclick={() => toggleStepExpanded(stepIndex)}
+									title="Click to see call details"
+								>
+									{#if step.done}
+										<span class="text-emerald-600 dark:text-emerald-400" aria-hidden="true">✓</span>
+									{:else}
+										<span
+											class="inline-block size-1.5 shrink-0 animate-pulse rounded-full bg-muted-foreground/70"
+											aria-hidden="true"
+										></span>
+									{/if}
+									<span>{step.label}…</span>
+									<span class="text-muted-foreground/40 text-[10px] group-hover:text-muted-foreground/70">{step.expanded ? '▲' : '▼'}</span>
+								</button>
+								{#if step.expanded}
+									<div class="ml-4 mt-1 rounded border border-border/60 bg-muted/30 text-[11px] leading-relaxed overflow-hidden max-w-sm">
+										{#if step.thinking}
+											<div class="px-2.5 py-1.5 border-b border-border/50">
+												<p class="font-semibold text-muted-foreground mb-0.5 uppercase tracking-wide text-[10px]">Thinking</p>
+												<p class="text-foreground/80 whitespace-pre-wrap">{step.thinking}</p>
+											</div>
+										{/if}
+										<div class="px-2.5 py-1.5">
+											<p class="font-semibold text-muted-foreground mb-0.5 uppercase tracking-wide text-[10px]">Call</p>
+											<code class="font-mono text-foreground/90 whitespace-pre-wrap break-all">{step.toolName}({step.args ? JSON.stringify(step.args, null, 2) : ''})</code>
+										</div>
+									</div>
 								{/if}
-								<span>{step.label}…</span>
 							</li>
 						{/each}
 					</ul>

@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises';
-import path from 'node:path';
+import * as path from '$lib/server/paths';
 import { env } from '$env/dynamic/private';
 
 export type MediaType = 'video' | 'audio' | 'image' | 'document' | 'other';

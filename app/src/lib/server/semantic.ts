@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises';
-import path from 'node:path';
+import * as path from '$lib/server/paths';
 import { env } from '$env/dynamic/private';
 import { brain, type BrainPoint } from '$lib/server/services/vectordb';
 import { embedText, embedImage, createPointId } from '$lib/server/services/embedding';
@@ -299,7 +299,7 @@ async function walkRoot(rootPath: string, rootIndex: number, relativePrefix = ''
 		if (!dirent.isFile()) continue;
 
 		const stat = await fs.stat(fullPath);
-		const clientPath = `${rootIndex}/${nextRelative.split(path.sep).join('/')}`;
+		const clientPath = `${rootIndex}/${nextRelative}`;
 		const { mediaType, mimeType } = getMediaInfo(dirent.name);
 		files.push({
 			name: dirent.name,

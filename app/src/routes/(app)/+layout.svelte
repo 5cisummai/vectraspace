@@ -47,7 +47,7 @@
                     </div>
                 {/snippet}
             </AppTopbar>
-            <div class="min-h-0 flex-1 w-full overflow-auto">
+            <div class="min-h-0 min-w-0 flex-1 overflow-auto">
                 {@render children()}
             </div>
         </div>
