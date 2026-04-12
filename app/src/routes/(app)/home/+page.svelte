@@ -9,6 +9,7 @@
 	import { Textarea } from '$lib/components/ui/textarea';
 	import * as Card from '$lib/components/ui/card/index.js';
 	import { agentSessions } from '$lib/hooks/agent-sessions.svelte';
+	import { workspaceStore } from '$lib/hooks/workspace.svelte';
 	import { dedupeChatsById } from '$lib/utils.js';
 	import type { FileEntry } from '$lib/components/file-browser/file-grid.svelte';
 	import FilePreviewTile from '$lib/components/file-browser/file-preview-tile.svelte';
@@ -259,6 +260,7 @@
 						{#each agents.slice(0, 6) as agent (agent.id)}
 							<AgentStatusItem
 								chatId={agent.id}
+								workspaceId={workspaceStore.activeId}
 								name={agent.title || 'Agent session'}
 								description="{agent.messageCount} message{agent.messageCount === 1
 									? ''

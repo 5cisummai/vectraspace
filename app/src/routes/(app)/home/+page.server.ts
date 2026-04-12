@@ -9,10 +9,16 @@ type AgentSummary = {
 	status: 'idle' | 'working' | 'done';
 };
 
-export const load: PageServerLoad = async ({ fetch }) => {
+export const load: PageServerLoad = async ({ fetch, parent }) => {
+	const { activeWorkspaceId } = await parent();
+
+	if (!activeWorkspaceId) {
+		return { fileTree: [], agents: [] as AgentSummary[] };
+	}
+
 	const [browseResponse, chatsResponse] = await Promise.all([
 		fetch('/api/browse'),
-		fetch('/api/chats')
+		fetch(`/api/workspaces/${activeWorkspaceId}/chats`)
 	]);
 
 	const fileTree = browseResponse.ok ? await browseResponse.json() : [];

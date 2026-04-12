@@ -18,14 +18,21 @@
 	} from './types';
 
 	let {
+		workspaceId,
 		activeChatId = $bindable<string | null>(null),
 		activeAgentStatus = $bindable<'idle' | 'working' | 'done'>('idle'),
 		onListRefresh
 	}: {
+		/** Active workspace — all brain/chat APIs are scoped under `/api/workspaces/:id`. */
+		workspaceId: string | null;
 		activeChatId?: string | null;
 		activeAgentStatus?: 'idle' | 'working' | 'done';
 		onListRefresh?: () => void;
 	} = $props();
+
+	const apiRoot = $derived(
+		workspaceId ? `/api/workspaces/${encodeURIComponent(workspaceId)}` : null
+	);
 
 	let messages = $state<ChatMessage[]>([]);
 	let input = $state('');
@@ -282,8 +289,9 @@
 	}
 
 	async function maybeAttachToActiveBackgroundRun(chatId: string) {
+		if (!apiRoot) return;
 		const response = await apiFetch(
-			`/api/brain/runs/active?chatId=${encodeURIComponent(chatId)}`
+			`${apiRoot}/runs/active?chatId=${encodeURIComponent(chatId)}`
 		).catch(() => null);
 		if (!response?.ok) return;
 		const payload = (await response.json()) as { run?: BackgroundRunPayload | null };
@@ -297,7 +305,8 @@
 	async function pollBackgroundRun(runId: string) {
 		if (!runId || runId !== backgroundRunId) return;
 		try {
-			const response = await apiFetch(`/api/brain/runs/${encodeURIComponent(runId)}`, {
+			if (!apiRoot) return;
+			const response = await apiFetch(`${apiRoot}/runs/${encodeURIComponent(runId)}`, {
 				signal: agentRunAbortController?.signal
 			});
 			if (!response.ok) {
@@ -623,7 +632,8 @@
 	}
 
 	async function truncateRemote(chatId: string, fromMessageId: string): Promise<void> {
-		const response = await apiFetch(`/api/chats/${encodeURIComponent(chatId)}/truncate`, {
+		if (!apiRoot) throw new Error('No workspace selected');
+		const response = await apiFetch(`${apiRoot}/chats/${encodeURIComponent(chatId)}/truncate`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ fromMessageId })
@@ -649,7 +659,10 @@
 		const signal = agentRunAbortController.signal;
 
 		try {
-			const response = await apiFetch('/api/brain/ask', {
+			if (!apiRoot) {
+				throw new Error('No workspace selected');
+			}
+			const response = await apiFetch(`${apiRoot}/brain/ask`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -747,7 +760,10 @@
 		const signal = agentRunAbortController.signal;
 
 		try {
-			const response = await apiFetch('/api/brain/ask/confirm', {
+			if (!apiRoot) {
+				throw new Error('No workspace selected');
+			}
+			const response = await apiFetch(`${apiRoot}/brain/ask/confirm`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -826,7 +842,10 @@
 		pendingToolConfirmation = null;
 		editingUserId = null;
 		try {
-			const response = await apiFetch(`/api/chats/${encodeURIComponent(chatId)}`);
+			if (!apiRoot) {
+				throw new Error('No workspace selected');
+			}
+			const response = await apiFetch(`${apiRoot}/chats/${encodeURIComponent(chatId)}`);
 			if (!response.ok) {
 				throw new Error(`Failed to load chat (${response.status})`);
 			}

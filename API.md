@@ -324,22 +324,35 @@ Each **SearchResult** item:
 
 ---
 
+### Workspace — list / create chats
+
+- `GET /api/workspaces/{workspaceId}/chats` — list chats in the workspace (member+).
+- `POST /api/workspaces/{workspaceId}/chats` — create a chat (body: optional `title`).
+- `GET /api/workspaces/{workspaceId}/chats/{chatId}` — messages for a chat.
+- `DELETE /api/workspaces/{workspaceId}/chats/{chatId}` — delete chat (member+).
+- `POST /api/workspaces/{workspaceId}/chats/{chatId}/truncate` — body `{ "fromMessageId": "<id>" }` truncates from that message onward (owner validation via chat membership).
+
 ### Brain — ask (agent + tools)
 
-`POST /api/brain/ask`
+`POST /api/workspaces/{workspaceId}/brain/ask`
 
-**Auth**: Required.
+**Auth**: Required; workspace **member** or higher.
 
-Runs a **server-side agent loop** (up to 20 iterations) with tool calling (`search_files`, `list_directory`, `get_file_info`, `read_file`, `search_by_metadata`). The same pipeline runs for both JSON and streaming modes.
+Runs a **server-side agent loop** (up to 20 iterations) with tool calling (`search`, `list_directory`, `get_file_info`, `read_file`, `search_by_metadata`, and optional mutating tools with confirmation). Chats and agent runs are scoped to `{workspaceId}`.
 
 **Body**:
 
 | Field      | Type    | Required | Description                                                      |
 | ---------- | ------- | -------- | ---------------------------------------------------------------- |
-| `question` | string  | yes      | User question                                                    |
-| `history`  | array   | no       | Prior turns; see **LlmMessage** below                            |
-| `filters`  | object  | no       | Default scope for `search_files` tool                            |
-| `stream`   | boolean | no       | If `true`, NDJSON stream; if false/omitted, single JSON response |
+| `question` | string  | yes*     | User question (*omit when `regenerate: true` — server uses last user message) |
+| `chatId`   | string  | no       | Existing chat; omit to create a new session                      |
+| `history`  | array   | no       | Prior turns (usually loaded from DB when `chatId` is set)        |
+| `filters`  | object  | no       | Default scope for semantic `search` tool                         |
+| `stream`   | boolean | no       | If `true`, NDJSON stream; if false/omitted, sync JSON (unless `background`) |
+| `background` | boolean | no     | If `true`, returns `{ chatId, runId, status }` and runs async    |
+| `regenerate` | boolean | no    | Replay last user message in `chatId`                             |
+| `maxHistoryMessages` | number | no | Trim prior context                                             |
+| `autoApproveToolNames` | string[] | no | Client opt-in for mutating tools (server-whitelisted names)   |
 
 **filters** (optional; defaults applied when the model calls `search_files` without overriding):
 
@@ -555,19 +568,32 @@ Also removes matching `uploadedFile` rows and attempts semantic index cleanup fo
 
 ---
 
+### Brain — tool confirmation resume
+
+`POST /api/workspaces/{workspaceId}/brain/ask/confirm`
+
+**Body**: `{ "pendingId": "<id>", "approved": boolean, "chatId?": "...", "stream?": ..., "background?": ..., "autoApproveToolNames?": [...] }`
+
+### Workspace — agent run status
+
+- `GET /api/workspaces/{workspaceId}/runs/active?chatId=<id>` — optional active run for a chat.
+- `GET /api/workspaces/{workspaceId}/runs/{runId}` — run detail.
+- `GET /api/workspaces/{workspaceId}/events?types=run.status` — SSE; `run.status` events include `chatId`, `status`, `runId`.
+
 ## Agent tools (server-side)
 
-Tool schemas are defined in `app/src/lib/server/tools/definitions.ts`. The LLM may call:
+Tool definitions live under `app/src/lib/server/agent/tools/`. The LLM may call tools such as:
 
 | Tool                 | Purpose                                                             |
 | -------------------- | ------------------------------------------------------------------- |
-| `search_files`       | Semantic search over the filename/metadata index (`semanticSearch`) |
-| `list_directory`     | List folder contents (`list_directory`)                             |
+| `search`             | Semantic search over the filename/metadata index (`semanticSearch`) |
+| `list_directory`     | List folder contents                                                |
 | `get_file_info`      | File or directory metadata                                          |
 | `read_file`          | Read text-oriented file content where supported                     |
 | `search_by_metadata` | Filter vector DB by metadata without a semantic query               |
+| `delete_file`, `move_file`, … | Mutating tools — may require UI confirmation (`needsApproval`) |
 
-Clients do not invoke these directly; they are used inside `POST /api/brain/ask`.
+Clients do not invoke these directly; they are used inside `POST /api/workspaces/{workspaceId}/brain/ask`.
 
 ---
 
@@ -576,7 +602,7 @@ Clients do not invoke these directly; they are used inside `POST /api/brain/ask`
 1. **Login**: `POST /api/auth/login` → store `accessToken` securely (Keychain).
 2. **Calls**: Send `Authorization: Bearer <accessToken>` on every `/api/*` request except login/signup.
 3. **Refresh**: Either implement cookie jar for `POST /api/auth/refresh`, or re-login when access JWT expires (depends on your JWT expiry settings in `auth`).
-4. **Brain**: Use `POST /api/brain/ask` with JSON or NDJSON streaming as documented; **no need to reimplement** search/browse/read logic on the client.
+4. **Brain**: Use `POST /api/workspaces/{workspaceId}/brain/ask` (and related workspace routes above) with JSON, NDJSON streaming, or `background: true` as implemented; **no need to reimplement** search/browse/read logic on the client.
 5. **Paths**: Always use `rootIndex/...` paths as returned by browse/upload APIs.
 
 ---

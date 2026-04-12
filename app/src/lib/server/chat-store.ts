@@ -8,7 +8,6 @@ import { dedupeChatsById } from '$lib/utils.js';
 
 const UNTITLED_CHAT = 'New chat';
 const MAX_TITLE_LENGTH = 120;
-const MAX_LIST_CHATS = 100;
 
 type ChatSessionRow = {
 	id: string;
@@ -193,31 +192,6 @@ export function messagesToLlmHistory(messages: StoredChatMessage[]): Conversatio
 	}));
 }
 
-export async function listChatsForUser(userId: string): Promise<ChatSummary[]> {
-	const rows = await db.chatSession.findMany({
-		where: { userId },
-		orderBy: { updatedAt: 'desc' },
-		take: MAX_LIST_CHATS,
-		select: {
-			id: true,
-			title: true,
-			createdAt: true,
-			updatedAt: true,
-			_count: {
-				select: { messages: true }
-			}
-		}
-	});
-
-	return rows.map((row) => ({
-		id: row.id,
-		title: row.title,
-		createdAt: row.createdAt.toISOString(),
-		updatedAt: row.updatedAt.toISOString(),
-		messageCount: row._count.messages
-	}));
-}
-
 export async function withChatStatuses<T extends { id: string }>(
 	items: T[],
 	userId?: string
@@ -238,15 +212,16 @@ export async function withChatStatuses<T extends { id: string }>(
 	return dedupeChatsById(itemsWithStatus);
 }
 
-export async function listChatsWithStatusForUser(userId: string): Promise<ChatSummaryWithStatus[]> {
-	return withChatStatuses(await listChatsForUser(userId), userId);
-}
-
-export async function createChatForUser(userId: string, title: string): Promise<ChatSummary> {
+export async function createChatForUser(
+	userId: string,
+	title: string,
+	workspaceId?: string | null
+): Promise<ChatSummary> {
 	const row = await db.chatSession.create({
 		data: {
 			userId,
-			title: sanitizeTitle(title) || UNTITLED_CHAT
+			title: sanitizeTitle(title) || UNTITLED_CHAT,
+			...(workspaceId ? { workspaceId } : {})
 		},
 		select: {
 			id: true,
@@ -267,13 +242,16 @@ export async function createChatForUser(userId: string, title: string): Promise<
 
 export async function ensureOwnedChatSession(
 	userId: string,
-	chatId: string
+	chatId: string,
+	workspaceId?: string | null
 ): Promise<{ id: string; title: string }> {
+	const where =
+		workspaceId !== undefined && workspaceId !== null
+			? { id: chatId, userId, workspaceId }
+			: { id: chatId, userId };
+
 	const row = await db.chatSession.findFirst({
-		where: {
-			id: chatId,
-			userId
-		},
+		where,
 		select: {
 			id: true,
 			title: true
@@ -368,9 +346,10 @@ export async function saveAssistantMessage(
 export async function deleteMessagesFromMessageId(
 	userId: string,
 	chatId: string,
-	fromMessageId: string
+	fromMessageId: string,
+	workspaceId?: string | null
 ): Promise<void> {
-	await ensureOwnedChatSession(userId, chatId);
+	await ensureOwnedChatSession(userId, chatId, workspaceId);
 
 	const rows = await db.chatMessage.findMany({
 		where: { chatSessionId: chatId },
@@ -399,10 +378,11 @@ export async function deleteMessagesFromMessageId(
 export async function resolveOrCreateChat(
 	userId: string,
 	chatId: string | undefined,
-	firstMessage: string
+	firstMessage: string,
+	workspaceId?: string | null
 ): Promise<ChatSummary> {
 	if (chatId) {
-		const row = await ensureOwnedChatSession(userId, chatId);
+		const row = await ensureOwnedChatSession(userId, chatId, workspaceId);
 		const found = await db.chatSession.findUniqueOrThrow({
 			where: { id: row.id },
 			select: {
@@ -423,5 +403,5 @@ export async function resolveOrCreateChat(
 	}
 
 	const title = await titleFromFirstUserMessage(firstMessage);
-	return createChatForUser(userId, title);
+	return createChatForUser(userId, title, workspaceId);
 }

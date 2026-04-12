@@ -7,6 +7,7 @@
 
 import { db } from '$lib/server/db';
 import type { AgentRunStatus } from '@prisma/client';
+import { emit as emitWorkspaceEvent } from '$lib/server/services/event-bus';
 
 // ---------------------------------------------------------------------------
 // Types (backward-compatible with the old in-memory interface)
@@ -55,27 +56,17 @@ export interface RunStep {
 }
 
 // ---------------------------------------------------------------------------
-// Subscriber bus — real-time status events (SSE / workspace events)
+// Real-time status — workspace-scoped SSE via event-bus (`run.status` events)
 // ---------------------------------------------------------------------------
-
-type RunStatusListener = (
-	userId: string,
-	chatId: string,
-	status: ApiRunStatus,
-	workspaceId?: string | null
-) => void;
-
-const listeners = new Set<RunStatusListener>();
-
-export function subscribeRunStatus(cb: RunStatusListener): () => void {
-	listeners.add(cb);
-	return () => listeners.delete(cb);
-}
 
 function emit(run: AgentRunRecord): void {
 	const apiStatus = toApiStatus(run.status);
-	for (const cb of listeners) {
-		cb(run.userId, run.chatId, apiStatus, run.workspaceId);
+	if (run.workspaceId) {
+		emitWorkspaceEvent(run.workspaceId, 'run.status', {
+			chatId: run.chatId,
+			status: apiStatus,
+			runId: run.id
+		});
 	}
 }
 

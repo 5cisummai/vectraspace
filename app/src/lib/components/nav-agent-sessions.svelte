@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { dedupeChatsById } from '$lib/utils.js';
 	import { agentSessions } from '$lib/hooks/agent-sessions.svelte';
+	import { workspaceStore } from '$lib/hooks/workspace.svelte';
 	import AgentStatusItem from '$lib/components/agent-status-item.svelte';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
@@ -19,9 +19,14 @@
 
 	let sessions = $state<AgentSession[]>([]);
 
-	onMount(async () => {
+	async function loadSessions() {
+		const ws = workspaceStore.activeId;
+		if (!ws) {
+			sessions = [];
+			return;
+		}
 		try {
-			const res = await fetch('/api/chats');
+			const res = await fetch(`/api/workspaces/${encodeURIComponent(ws)}/chats`);
 			if (res.ok) {
 				const payload = (await res.json()) as { chats?: AgentSession[] };
 				const list = dedupeChatsById(Array.isArray(payload.chats) ? payload.chats : []);
@@ -30,6 +35,11 @@
 		} catch {
 			// silently fail — sidebar is non-critical
 		}
+	}
+
+	$effect(() => {
+		void workspaceStore.activeId;
+		void loadSessions();
 	});
 
 	// Sort: working sessions first, then by recency
@@ -54,6 +64,7 @@
 							<Tooltip.Trigger class="w-full">
 								<AgentStatusItem
 									chatId={session.id}
+									workspaceId={workspaceStore.activeId}
 									name={session.title || 'Agent session'}
 									href={`/chat?agent=${encodeURIComponent(session.id)}`}
 									sessionStatus={session.status}
@@ -68,6 +79,7 @@
 					{:else}
 						<AgentStatusItem
 							chatId={session.id}
+							workspaceId={workspaceStore.activeId}
 							name={session.title || 'Agent session'}
 							href={`/chat?agent=${encodeURIComponent(session.id)}`}
 							sessionStatus={session.status}

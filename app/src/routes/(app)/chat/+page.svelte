@@ -18,6 +18,7 @@
 		SIDEBAR_COOKIE_MAX_AGE
 	} from '$lib/components/ui/sidebar/constants.js';
 	import { IsMobile } from '$lib/hooks/is-mobile.svelte.js';
+	import { workspaceStore } from '$lib/hooks/workspace.svelte';
 	import { dedupeChatsById } from '$lib/utils.js';
 	import type { PageData } from './$types';
 
@@ -34,6 +35,8 @@
 	}
 
 	let { data }: { data: PageData } = $props();
+
+	const workspaceId = $derived(workspaceStore.activeId);
 
 	let agents = $state<AgentSummary[]>([]);
 	let activeAgentId = $state<string | null>(null);
@@ -55,9 +58,14 @@
 	let deleteError = $state<string | null>(null);
 
 	async function fetchAgents(preferredAgentId?: string): Promise<void> {
+		const ws = workspaceStore.activeId;
 		loadingAgents = true;
 		try {
-			const response = await fetch('/api/chats');
+			if (!ws) {
+				agents = [];
+				return;
+			}
+			const response = await fetch(`/api/workspaces/${encodeURIComponent(ws)}/chats`);
 			if (!response.ok) {
 				throw new Error(`Failed to load agents (${response.status})`);
 			}
@@ -98,12 +106,20 @@
 
 	async function confirmDeleteChat() {
 		if (!deleteTarget) return;
+		const ws = workspaceStore.activeId;
+		if (!ws) {
+			deleteError = 'No workspace selected';
+			return;
+		}
 		deleteSubmitting = true;
 		deleteError = null;
 		try {
-			const response = await fetch(`/api/chats/${encodeURIComponent(deleteTarget.id)}`, {
-				method: 'DELETE'
-			});
+			const response = await fetch(
+				`/api/workspaces/${encodeURIComponent(ws)}/chats/${encodeURIComponent(deleteTarget.id)}`,
+				{
+					method: 'DELETE'
+				}
+			);
 			if (!response.ok) {
 				throw new Error(`Failed to delete chat (${response.status})`);
 			}
@@ -136,6 +152,25 @@
 		if (diff < day) return `${Math.floor(diff / hour)}h ago`;
 		return `${Math.floor(diff / day)}d ago`;
 	}
+
+	/** Skip first run (onMount loads initially); refetch when the active workspace changes. */
+	let previousWorkspaceId = $state<string | null | undefined>(undefined);
+	$effect(() => {
+		const ws = workspaceStore.activeId;
+		if (previousWorkspaceId === undefined) {
+			previousWorkspaceId = ws;
+			return;
+		}
+		if (ws === previousWorkspaceId) return;
+		previousWorkspaceId = ws;
+		if (!ws) {
+			agents = [];
+			activeAgentId = null;
+			agentPanel?.resetConversation();
+			return;
+		}
+		void fetchAgents();
+	});
 
 	onMount(() => {
 		void (async () => {
@@ -196,6 +231,7 @@
 							<ContextMenu.Trigger class="w-full">
 								<AgentStatusItem
 									chatId={agent.id}
+									workspaceId={workspaceId}
 									name={agent.title}
 									description="{agent.messageCount} message{agent.messageCount === 1
 										? ''
@@ -255,6 +291,7 @@
 
 		<div class="relative flex h-full min-h-0 flex-1">
 			<ChatLlm
+				workspaceId={workspaceId}
 				bind:this={agentPanel}
 				bind:activeChatId={activeAgentId}
 				bind:activeAgentStatus

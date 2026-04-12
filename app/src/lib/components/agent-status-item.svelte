@@ -30,6 +30,8 @@
 	let {
 		/** Poll a specific run by ID for detailed status. */
 		runId,
+		/** Workspace scope for `/api/workspaces/:id/runs/...` when polling `runId`. */
+		workspaceId,
 		/** Use the SSE-backed agentSessions store for a chat's status (lightweight). */
 		chatId,
 		/** Display name for the agent. Defaults to run kind or "Agent". */
@@ -52,6 +54,7 @@
 		class: className
 	}: {
 		runId?: string;
+		workspaceId?: string | null;
 		chatId?: string;
 		name?: string;
 		description?: string;
@@ -71,9 +74,11 @@
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 	async function fetchRun() {
-		if (!runId) return;
+		if (!runId || !workspaceId) return;
 		try {
-			const res = await apiFetch(`/api/brain/runs/${encodeURIComponent(runId)}`);
+			const res = await apiFetch(
+				`/api/workspaces/${encodeURIComponent(workspaceId)}/runs/${encodeURIComponent(runId)}`
+			);
 			if (res.ok) {
 				run = await res.json();
 			}
@@ -167,10 +172,11 @@
 	AgentStatusItem — displays a live status indicator for an agent run.
 
 	Props:
-	  runId?  — polls /api/brain/runs/:id for detailed status
-	  chatId? — uses SSE-backed agentSessions store (lightweight)
-	  name    — display label (defaults to run kind or "Agent")
-	  href    — makes the item a link
+	  runId?        — polls /api/workspaces/:workspaceId/runs/:id (needs workspaceId)
+	  workspaceId?  — required when using runId
+	  chatId?       — uses SSE-backed agentSessions store (lightweight)
+	  name          — display label (defaults to run kind or "Agent")
+	  href          — makes the item a link
 -->
 <Item.Root
 	{size}

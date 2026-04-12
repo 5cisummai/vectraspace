@@ -3,14 +3,14 @@
  *
  * Client-side reactive store for agent session statuses.
  *
- * - Maintains a `Map<chatId, 'working' | 'idle'>` updated via the SSE
- *   endpoint `/api/brain/runs/events` (server pushes on every run status change).
+ * - Subscribes to workspace SSE (`run.status` on `/api/workspaces/:id/events`) so
+ *   any chat in that workspace reflects background run state.
  * - `ChatLlm` calls `setWorking` / `setIdle` for immediate local feedback.
  * - Any component can call `getStatus(chatId)` to read live status.
  *
  * Usage:
  *   import { agentSessions } from '$lib/hooks/agent-sessions.svelte';
- *   agentSessions.connect(); // call once from the (app) layout
+ *   agentSessions.connect(workspaceId); // from layout when active workspace is known
  *   agentSessions.getStatus(chatId); // 'working' | 'idle'
  */
 
@@ -24,6 +24,7 @@ class AgentSessionsStore {
 
 	#es: EventSource | null = null;
 	#reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+	#workspaceId: string | null = null;
 
 	get statuses(): ReadonlyMap<string, AgentStatus> {
 		return this.#statuses;
@@ -43,7 +44,7 @@ class AgentSessionsStore {
 		this.#statuses = next;
 	}
 
-	/** Seed multiple statuses from an initial fetch (e.g. /api/chats). */
+	/** Seed multiple statuses from an initial fetch (e.g. workspace chat list). */
 	seedFromChats(chats: { id: string; status: AgentStatus | string }[]) {
 		const next = new Map(this.#statuses);
 		for (const c of chats) {
@@ -56,37 +57,46 @@ class AgentSessionsStore {
 		this.#statuses = next;
 	}
 
-	/** Open the SSE connection. Safe to call multiple times (no-ops if already open). */
-	connect() {
-		if (!browser || this.#es) return;
+	/** Open SSE for the given workspace. Reconnects when `workspaceId` changes. */
+	connect(workspaceId: string | null) {
+		if (!browser) return;
 
-		this.#es = new EventSource('/api/brain/runs/events');
+		if (!workspaceId) {
+			this.disconnect();
+			return;
+		}
 
-		this.#es.onmessage = (e: MessageEvent<string>) => {
+		if (this.#workspaceId === workspaceId && this.#es) return;
+
+		this.disconnect();
+		this.#workspaceId = workspaceId;
+
+		const url = `/api/workspaces/${encodeURIComponent(workspaceId)}/events?types=${encodeURIComponent('run.status')}`;
+		this.#es = new EventSource(url);
+
+		this.#es.addEventListener('run.status', (e: MessageEvent<string>) => {
 			try {
-				const { chatId, status } = JSON.parse(e.data) as {
-					chatId: string;
-					status: string;
-				};
+				const payload = JSON.parse(e.data) as { chatId?: string; status?: string };
+				const { chatId, status } = payload;
+				if (!chatId || !status) return;
 				if (status === 'queued' || status === 'running') {
 					this.setWorking(chatId);
 				} else {
-					// done, failed, awaiting_confirmation → not "in progress"
 					this.setIdle(chatId);
 				}
 			} catch {
 				// malformed event — ignore
 			}
-		};
+		});
 
 		this.#es.onerror = () => {
 			this.#es?.close();
 			this.#es = null;
-			// Back-off reconnect
 			if (this.#reconnectTimer) clearTimeout(this.#reconnectTimer);
+			const wid = this.#workspaceId;
 			this.#reconnectTimer = setTimeout(() => {
 				this.#reconnectTimer = null;
-				this.connect();
+				if (wid) this.connect(wid);
 			}, 5_000);
 		};
 	}
@@ -98,6 +108,7 @@ class AgentSessionsStore {
 		}
 		this.#es?.close();
 		this.#es = null;
+		this.#workspaceId = null;
 	}
 }
 

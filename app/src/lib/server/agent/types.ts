@@ -119,7 +119,8 @@ export interface AgentRunConfig {
 	userId: string;
 	isAdmin: boolean;
 	chatId?: string;
-	workspaceId?: string;
+	/** Required — agent runs are always scoped to a workspace. */
+	workspaceId: string;
 	mode: TransportMode;
 	/** When true, replay the last user message instead of appending a new one. */
 	regenerate?: boolean;
@@ -135,7 +136,7 @@ export interface ConfirmRunConfig {
 	pendingId: string;
 	approved: boolean;
 	chatId?: string;
-	workspaceId?: string;
+	workspaceId: string;
 	mode: TransportMode;
 	autoApproveToolNames?: string[];
 }

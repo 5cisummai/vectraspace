@@ -1,12 +1,12 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { onMount } from 'svelte';
 	import AppTopbar from '$lib/components/app-topbar.svelte';
 	import AppSidebar from '$lib/components/app-sidebar.svelte';
 	import { Separator } from '$lib/components/ui/separator/index.js';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 	import { agentSessions } from '$lib/hooks/agent-sessions.svelte';
 	import { workspaceStore } from '$lib/hooks/workspace.svelte';
+	import { browser } from '$app/environment';
 	import type { LayoutData } from './$types';
 
 	let { children, data }: { children: Snippet; data: LayoutData } = $props();
@@ -23,8 +23,10 @@
 		);
 	});
 
-	onMount(() => {
-		agentSessions.connect();
+	$effect(() => {
+		if (!browser) return;
+		const id = workspaceStore.activeId ?? data.activeWorkspaceId ?? null;
+		agentSessions.connect(id);
 		return () => agentSessions.disconnect();
 	});
 </script>

@@ -397,7 +397,7 @@ export async function chatFast(prompt: string, system?: string): Promise<string>
 	return chatText(prompt, system, { model: env.LLM_FAST_MODEL });
 }
 
-const CHAT_TITLE_SYSTEM = `You label chat sessions. Respond with only a short title: a few words that summarize the user's message. No quotes. No explanation. One line.`;
+const CHAT_TITLE_SYSTEM = `You label chat sessions. Respond with only a short title: a few words (3-4) that summarize the user's message. No quotes. No explanation. One line.`;
 
 /**
  * Turn the first user message into a concise chat title via the configured LLM (see llm.ts / chatText).
@@ -407,7 +407,7 @@ export async function summarizePromptAsChatTitle(userMessage: string): Promise<s
 	if (!text) return '';
 	return chatText(text, CHAT_TITLE_SYSTEM, {
 		model: env.LLM_FAST_MODEL ?? env.LLM_MODEL,
-		temperature: 0.2,
+		temperature: 0.4,
 		timeout: 20_000
 	});
 }

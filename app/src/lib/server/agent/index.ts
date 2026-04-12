@@ -83,6 +83,10 @@ export async function runAgent(
 	config: AgentRunConfig,
 	filters?: import('./types').AskFilters
 ): Promise<Response> {
+	if (!config.workspaceId?.trim()) {
+		throw error(400, 'workspaceId is required');
+	}
+
 	const logger = new AgentLogger();
 
 	let chatId: string;
@@ -92,7 +96,7 @@ export async function runAgent(
 	if (config.regenerate) {
 		if (!config.chatId?.trim()) throw error(400, 'chatId is required when regenerate is true');
 		try {
-			await ensureOwnedChatSession(config.userId, config.chatId);
+			await ensureOwnedChatSession(config.userId, config.chatId, config.workspaceId);
 		} catch {
 			throw error(404, 'Chat not found');
 		}
@@ -112,7 +116,12 @@ export async function runAgent(
 			autoApproveToolNames: config.autoApproveToolNames
 		};
 	} else {
-		const chat = await resolveOrCreateChat(config.userId, config.chatId, question).catch(() => {
+		const chat = await resolveOrCreateChat(
+			config.userId,
+			config.chatId,
+			question,
+			config.workspaceId
+		).catch(() => {
 			throw error(404, 'Chat not found');
 		});
 		chatId = chat.id;
@@ -149,6 +158,10 @@ export async function runAgent(
 // ---------------------------------------------------------------------------
 
 export async function confirmTool(config: ConfirmRunConfig): Promise<Response> {
+	if (!config.workspaceId?.trim()) {
+		throw error(400, 'workspaceId is required');
+	}
+
 	const logger = new AgentLogger();
 
 	const taken = await takePendingConfirmation(config.userId, config.pendingId);
