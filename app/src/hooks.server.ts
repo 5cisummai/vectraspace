@@ -1,12 +1,33 @@
 import { verifyJwt } from '$lib/server/auth';
 import { db } from '$lib/server/db';
 import type { Handle } from '@sveltejs/kit';
+import type { UserRole } from '@prisma/client';
 
 const refreshCookieDeleteOpts = {
 	path: '/',
 	secure: process.env.NODE_ENV === 'production',
 	sameSite: 'strict' as const
 };
+
+// Short-lived cache for user DB validation (avoids a DB hit on every request)
+const USER_CACHE_TTL_MS = 30_000; // 30 seconds
+type CachedUser = { role: UserRole; approved: boolean; deletedAt: Date | null; cachedAt: number };
+const userValidationCache = new Map<string, CachedUser>();
+
+function getCachedUser(userId: string): CachedUser | null {
+	const entry = userValidationCache.get(userId);
+	if (!entry) return null;
+	if (Date.now() - entry.cachedAt > USER_CACHE_TTL_MS) {
+		userValidationCache.delete(userId);
+		return null;
+	}
+	return entry;
+}
+
+/** Call when a user is mutated (role change, deletion, approval change) to bust the cache. */
+export function invalidateUserCache(userId: string): void {
+	userValidationCache.delete(userId);
+}
 
 // Routes accessible without a valid JWT
 const PUBLIC_PATHS = [
@@ -43,19 +64,25 @@ export const handle: Handle = async ({ event, resolve }) => {
 	}
 
 	// Validate user still exists, is not soft-deleted, and is approved.
-	// This catches: deleted users, rejected users, revoked accounts, DB resets.
+	// Uses a short-lived cache to avoid hitting the DB on every request.
 	if (event.locals.user) {
-		const row = await db.user.findUnique({
-			where: { id: event.locals.user.id },
-			select: { id: true, role: true, approved: true, deletedAt: true }
-		});
-		if (!row || row.deletedAt !== null || !row.approved) {
+		const userId = event.locals.user.id;
+		let cached = getCachedUser(userId);
+		if (!cached) {
+			const row = await db.user.findUnique({
+				where: { id: userId },
+				select: { id: true, role: true, approved: true, deletedAt: true }
+			});
+			if (row) {
+				cached = { role: row.role, approved: row.approved, deletedAt: row.deletedAt, cachedAt: Date.now() };
+				userValidationCache.set(userId, cached);
+			}
+		}
+		if (!cached || cached.deletedAt !== null || !cached.approved) {
 			event.locals.user = undefined;
 			event.cookies.delete('refreshToken', refreshCookieDeleteOpts);
 		} else {
-			// Refresh role from DB so locals.user always has the current role.
-			// This reduces (but does not eliminate) stale-role windows.
-			event.locals.user.role = row.role;
+			event.locals.user.role = cached.role;
 		}
 	}
 

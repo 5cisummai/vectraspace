@@ -196,7 +196,7 @@ export async function searchIngestChunks(
 		minScore?: number;
 	}
 ): Promise<IngestChunkHit[]> {
-	const vector = (await embedText(query)).vector;
+	const vector = (await embedText(query, 'query')).vector;
 	const limit = Math.max(1, Math.min(options?.limit ?? 16, 48));
 	const prefetch = Math.min(options?.prefetchLimit ?? (options?.pathContains ? 80 : 40), 128);
 	const minScore =
@@ -279,19 +279,28 @@ async function toMediaFileEntry(relativePath: string): Promise<MediaEntry | null
 	};
 }
 
-async function walkRoot(
+
+
+/** Walk roots and yield files one at a time to avoid loading all into memory. */
+async function* streamAllFiles(): AsyncGenerator<MediaEntry> {
+	const roots = getMediaRoots();
+	for (let i = 0; i < roots.length; i++) {
+		yield* walkRootStream(roots[i], i);
+	}
+}
+
+async function* walkRootStream(
 	rootPath: string,
 	rootIndex: number,
 	relativePrefix = ''
-): Promise<MediaEntry[]> {
+): AsyncGenerator<MediaEntry> {
 	let dirents;
 	try {
 		dirents = await fs.readdir(path.join(rootPath, relativePrefix), { withFileTypes: true });
 	} catch {
-		return [];
+		return;
 	}
 
-	const files: MediaEntry[] = [];
 	for (const dirent of dirents) {
 		if (dirent.name.startsWith('.')) continue;
 
@@ -299,8 +308,7 @@ async function walkRoot(
 		const fullPath = path.join(rootPath, nextRelative);
 
 		if (dirent.isDirectory()) {
-			const nested = await walkRoot(rootPath, rootIndex, nextRelative);
-			files.push(...nested);
+			yield* walkRootStream(rootPath, rootIndex, nextRelative);
 			continue;
 		}
 
@@ -309,7 +317,7 @@ async function walkRoot(
 		const stat = await fs.stat(fullPath);
 		const clientPath = `${rootIndex}/${nextRelative}`;
 		const { mediaType, mimeType } = getMediaInfo(dirent.name);
-		files.push({
+		yield {
 			name: dirent.name,
 			path: clientPath,
 			fullPath,
@@ -318,22 +326,8 @@ async function walkRoot(
 			mimeType,
 			size: stat.size,
 			modified: stat.mtime.toISOString()
-		});
+		};
 	}
-
-	return files;
-}
-
-async function collectAllFiles(): Promise<MediaEntry[]> {
-	const roots = getMediaRoots();
-	const all: MediaEntry[] = [];
-
-	for (let i = 0; i < roots.length; i++) {
-		const files = await walkRoot(roots[i], i);
-		all.push(...files);
-	}
-
-	return all;
 }
 
 function rootIndexFromPath(relativePath: string): number {
@@ -352,9 +346,9 @@ async function makePoint(
 	if (isSvgFile(entry)) {
 		const svgBody = await readSvgTextForEmbedding(entry);
 		const textForEmbed = svgBody ? `${metadataText}\n--- svg source ---\n${svgBody}` : metadataText;
-		vector = (await embedText(textForEmbed)).vector;
+		vector = (await embedText(textForEmbed, 'passage')).vector;
 	} else {
-		vector = (await embedText(metadataText)).vector;
+		vector = (await embedText(metadataText, 'passage')).vector;
 
 		if (entry.mediaType === 'image') {
 			try {
@@ -399,20 +393,12 @@ async function makePoint(
 }
 
 export async function reindexSemanticCollection(workspaceId?: string): Promise<ReindexSummary> {
-	const files = await collectAllFiles();
 	const concurrency = resolveReindexConcurrency();
-	if (files.length === 0) {
-		return {
-			totalFiles: 0,
-			indexed: 0,
-			skipped: 0,
-			deleted: 0,
-			imageContentEmbeddingsUsed: 0
-		};
-	}
+	const BATCH_SIZE = 50;
 
 	const existingIds = await brain.scrollPointIds(collectionName(workspaceId));
 
+	let totalFiles = 0;
 	let indexed = 0;
 	let skipped = 0;
 	let imageContentEmbeddingsUsed = 0;
@@ -420,8 +406,15 @@ export async function reindexSemanticCollection(workspaceId?: string): Promise<R
 	let buffer: BrainPoint[] = [];
 	let ensured = false;
 
-	for (let i = 0; i < files.length; i += concurrency) {
-		const batch = files.slice(i, i + concurrency);
+	let batch: MediaEntry[] = [];
+
+	for await (const entry of streamAllFiles()) {
+		totalFiles++;
+		batch.push(entry);
+
+		if (batch.length < BATCH_SIZE) continue;
+
+		// Process batch
 		const results = await Promise.allSettled(
 			batch.map(async (file) => {
 				const result = await makePoint(file);
@@ -429,11 +422,10 @@ export async function reindexSemanticCollection(workspaceId?: string): Promise<R
 			})
 		);
 
-		for (const [index, result] of results.entries()) {
-			const file = batch[index];
+		for (const [i, result] of results.entries()) {
 			if (result.status === 'rejected') {
 				skipped++;
-				console.warn('Failed to index file:', file.path, result.reason);
+				console.warn('Failed to index file:', batch[i].path, result.reason);
 				continue;
 			}
 
@@ -453,17 +445,56 @@ export async function reindexSemanticCollection(workspaceId?: string): Promise<R
 			await brain.upsertPoints(collectionName(workspaceId), buffer);
 			buffer = [];
 		}
+
+		if (totalFiles % 200 === 0) {
+			console.log(`[reindex] Progress: ${totalFiles} files scanned, ${indexed} indexed`);
+		}
+
+		batch = [];
+	}
+
+	// Process remaining batch
+	if (batch.length > 0) {
+		const results = await Promise.allSettled(
+			batch.map(async (file) => {
+				const result = await makePoint(file);
+				return { file, ...result };
+			})
+		);
+
+		for (const [i, result] of results.entries()) {
+			if (result.status === 'rejected') {
+				skipped++;
+				console.warn('Failed to index file:', batch[i].path, result.reason);
+				continue;
+			}
+
+			const { point, usedImageEmbedding } = result.value;
+			if (!ensured) {
+				ensured = true;
+				await brain.ensureCollection(collectionName(workspaceId), point.vector.length);
+			}
+
+			buffer.push(point);
+			newIds.add(point.id);
+			indexed++;
+			if (usedImageEmbedding) imageContentEmbeddingsUsed++;
+		}
 	}
 
 	if (buffer.length > 0) {
 		await brain.upsertPoints(collectionName(workspaceId), buffer);
 	}
 
+	if (totalFiles === 0) {
+		return { totalFiles: 0, indexed: 0, skipped: 0, deleted: 0, imageContentEmbeddingsUsed: 0 };
+	}
+
 	const stale = Array.from(existingIds).filter((id) => !newIds.has(id));
 	await brain.deletePoints(collectionName(workspaceId), stale);
 
 	return {
-		totalFiles: files.length,
+		totalFiles,
 		indexed,
 		skipped,
 		deleted: stale.length,
@@ -494,7 +525,7 @@ export async function semanticSearch(
 		minScore?: number;
 	}
 ): Promise<SearchResult[]> {
-	const vector = (await embedText(query)).vector;
+	const vector = (await embedText(query, 'query')).vector;
 	const limit = Math.max(1, Math.min(options?.limit ?? 30, 100));
 	const minScore =
 		typeof options?.minScore === 'number'

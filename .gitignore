@@ -49,3 +49,6 @@ env/
 .venv/
 
 .playwright-mcp
+
+models/
+jina-llama.cpp/

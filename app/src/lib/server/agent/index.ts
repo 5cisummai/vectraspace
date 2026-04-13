@@ -5,20 +5,17 @@
 //   runAgent()     — handle a new question or regeneration
 //   confirmTool()  — handle tool approval/denial and resume
 //
-// Both return either a JSON Response or a streaming Response.
+// All runs use background transport — the client polls via SSE.
 // ---------------------------------------------------------------------------
 
 import { json, error } from '@sveltejs/kit';
 import { run as sdkRun, RunState } from '@openai/agents';
 import { env } from '$env/dynamic/private';
-import type { AgentRequest, AgentRunConfig, ConfirmRunConfig, TransportMode } from './types';
+import type { AgentRequest, AgentRunConfig, ConfirmRunConfig } from './types';
 import { MAX_AGENT_ITERATIONS } from './types';
 import { createAppContext, type AgentAppContext } from './context';
 import { AgentLogger } from './logger';
-import { normalizeFilters, serializeFilters } from './filters';
-import { runAgentLoop } from './loop';
-import { buildSyncResponse } from './transport/sync';
-import { buildStreamResponse } from './transport/stream';
+import { normalizeFilters } from './filters';
 import { startBackgroundRun } from './transport/background';
 import { sliceHistory } from './memory/history';
 import { getMediaAgent } from './agent';
@@ -75,7 +72,7 @@ function makeContext(
 }
 
 // ---------------------------------------------------------------------------
-// runAgent — handles new questions and regenerations
+// runAgent — handles new questions and regenerations (background-only)
 // ---------------------------------------------------------------------------
 
 export async function runAgent(
@@ -148,9 +145,14 @@ export async function runAgent(
 		filters
 	);
 
-	logger.info('agent.run', { chatId, mode: config.mode, regenerate: !!config.regenerate });
+	logger.info('agent.run', { chatId, regenerate: !!config.regenerate });
 
-	return dispatch(config.mode, bodyForAgent, ctx, { chatId, savedUserMessageId, kind: 'ask' });
+	const result = await startBackgroundRun(bodyForAgent, ctx, {
+		chatId,
+		kind: 'ask',
+		savedUserMessageId
+	});
+	return json(result);
 }
 
 // ---------------------------------------------------------------------------
@@ -199,198 +201,35 @@ export async function confirmTool(config: ConfirmRunConfig): Promise<Response> {
 		logger
 	);
 
-	logger.info('agent.confirm', { chatId, mode: config.mode, approved: config.approved });
+	logger.info('agent.confirm', { chatId, approved: config.approved });
 
-	return dispatchResume(config.mode, runState, ctx, { chatId });
-}
-
-// ---------------------------------------------------------------------------
-// Unified dispatch — routes to sync / stream / background
-// ---------------------------------------------------------------------------
-
-async function dispatch(
-	mode: TransportMode,
-	request: AgentRequest,
-	ctx: AgentAppContext,
-	opts: { chatId: string; savedUserMessageId?: string | null; kind: 'ask' | 'confirm' }
-): Promise<Response> {
-	if (mode === 'background') {
-		const result = await startBackgroundRun(request, ctx, {
-			chatId: opts.chatId,
-			kind: opts.kind,
-			savedUserMessageId: opts.savedUserMessageId
-		});
-		return json(result);
-	}
-
-	if (mode === 'stream') {
-		const readable = buildStreamResponse(request, ctx, {
-			chatId: opts.chatId,
-			savedUserMessageId: opts.savedUserMessageId
-		});
-		return new Response(readable, {
-			headers: {
-				'Content-Type': 'application/x-ndjson; charset=utf-8',
-				'Cache-Control': 'no-cache',
-				Connection: 'keep-alive'
-			}
-		});
-	}
-
-	// Synchronous
-	try {
-		const model = getModel();
-		const filters = normalizeFilters(request.filters);
-		const outcome = await runAgentLoop(request, ctx);
-		const response = buildSyncResponse(outcome, opts.chatId, model, filters);
-
-		if (!response.awaitingConfirmation) {
-			await saveAssistantMessage(opts.chatId, response.answer, {
-				sources: response.sources,
-				toolCalls: response.toolCalls,
-				model: response.model,
-				iterations: response.iterations
-			});
-		}
-
-		return json(response);
-	} catch (err) {
-		const message = errorMessage(err);
-		ctx.logger.error('agent.sync_error', { error: message });
-		throw error(500, `Agent request failed: ${message}`);
-	}
-}
-
-// ---------------------------------------------------------------------------
-// dispatchResume — resumes a paused run from a serialized RunState
-// ---------------------------------------------------------------------------
-
-async function dispatchResume(
-	mode: TransportMode,
-	runState: InstanceType<typeof RunState>,
-	ctx: AgentAppContext,
-	opts: { chatId: string }
-): Promise<Response> {
+	// Background resume
 	const model = getModel();
-	const agent = getMediaAgent();
+	const agentRun = await createAgentRun(ctx.userId, chatId, 'confirm', ctx.workspaceId);
+	await supersedeOtherRunsForChat(ctx.userId, chatId, agentRun.id);
 
-	if (mode === 'background') {
-		const agentRun = await createAgentRun(ctx.userId, opts.chatId, 'confirm', ctx.workspaceId);
-		await supersedeOtherRunsForChat(ctx.userId, opts.chatId, agentRun.id);
+	void (async () => {
+		await markRunRunning(agentRun.id);
+		try {
+			const sdkResult = await sdkRun(agent, runState, {
+				context: ctx,
+				maxTurns: MAX_AGENT_ITERATIONS
+			});
+			const finalText = typeof sdkResult.finalOutput === 'string' ? sdkResult.finalOutput : null;
+			const answer = finalText ?? "I couldn't complete the request. Please try again.";
+			await saveAssistantMessage(chatId, answer, {
+				sources: ctx.sourceTracker.toArray(),
+				toolCalls: ctx.toolCalls,
+				model,
+				iterations: 0
+			});
+			await markRunDone(agentRun.id);
+		} catch (err) {
+			const message = errorMessage(err);
+			ctx.logger.error('resume_bg.failed', { error: message });
+			await markRunFailed(agentRun.id, message);
+		}
+	})();
 
-		void (async () => {
-			await markRunRunning(agentRun.id);
-			try {
-				const sdkResult = await sdkRun(agent, runState, {
-					context: ctx,
-					maxTurns: MAX_AGENT_ITERATIONS
-				});
-				const finalText = typeof sdkResult.finalOutput === 'string' ? sdkResult.finalOutput : null;
-				const answer = finalText ?? "I couldn't complete the request. Please try again.";
-				await saveAssistantMessage(opts.chatId, answer, {
-					sources: ctx.sourceTracker.toArray(),
-					toolCalls: ctx.toolCalls,
-					model,
-					iterations: 0
-				});
-				await markRunDone(agentRun.id);
-			} catch (err) {
-				const message = errorMessage(err);
-				ctx.logger.error('resume_bg.failed', { error: message });
-				await markRunFailed(agentRun.id, message);
-			}
-		})();
-
-		return json({ chatId: opts.chatId, runId: agentRun.id, status: 'queued' });
-	}
-
-	if (mode === 'stream') {
-		const encoder = new TextEncoder();
-		const readable = new ReadableStream<Uint8Array>({
-			async start(controller) {
-				const writeLine = (obj: Record<string, unknown>) => {
-					controller.enqueue(encoder.encode(`${JSON.stringify(obj)}\n`));
-				};
-				try {
-					const sdkResult = await sdkRun(agent, runState, {
-						stream: true,
-						context: ctx,
-						maxTurns: MAX_AGENT_ITERATIONS
-					});
-
-					let finalText = '';
-					for await (const event of sdkResult) {
-						if (
-							event.type === 'raw_model_stream_event' &&
-							event.data.type === 'output_text_delta'
-						) {
-							finalText += event.data.delta;
-							writeLine({ type: 'token', text: event.data.delta });
-						}
-					}
-
-					const answer =
-						finalText ||
-						(typeof sdkResult.finalOutput === 'string' ? sdkResult.finalOutput : null) ||
-						"I couldn't complete the request.";
-
-					writeLine({
-						type: 'meta',
-						chatId: opts.chatId,
-						sources: ctx.sourceTracker.toArray(),
-						filters: serializeFilters(ctx.filters),
-						model,
-						toolCalls: ctx.toolCalls,
-						iterations: sdkResult.currentTurn ?? 0
-					});
-					const savedId = await saveAssistantMessage(opts.chatId, answer, {
-						sources: ctx.sourceTracker.toArray(),
-						toolCalls: ctx.toolCalls,
-						model,
-						iterations: sdkResult.currentTurn ?? 0
-					});
-					if (savedId) writeLine({ type: 'message_saved', role: 'assistant', id: savedId });
-					writeLine({ type: 'done' });
-				} catch (err) {
-					writeLine({ type: 'error', message: errorMessage(err) });
-				} finally {
-					controller.close();
-				}
-			}
-		});
-		return new Response(readable, {
-			headers: {
-				'Content-Type': 'application/x-ndjson; charset=utf-8',
-				'Cache-Control': 'no-cache',
-				Connection: 'keep-alive'
-			}
-		});
-	}
-
-	// Synchronous resume
-	try {
-		const sdkResult = await sdkRun(agent, runState, {
-			context: ctx,
-			maxTurns: MAX_AGENT_ITERATIONS
-		});
-		const finalText = typeof sdkResult.finalOutput === 'string' ? sdkResult.finalOutput : null;
-		const answer = finalText ?? "I couldn't complete the request.";
-		await saveAssistantMessage(opts.chatId, answer, {
-			sources: ctx.sourceTracker.toArray(),
-			toolCalls: ctx.toolCalls,
-			model,
-			iterations: 0
-		});
-		return json({
-			chatId: opts.chatId,
-			answer,
-			sources: ctx.sourceTracker.toArray(),
-			filters: serializeFilters(ctx.filters),
-			model,
-			toolCalls: ctx.toolCalls,
-			iterations: 0
-		});
-	} catch (err) {
-		throw error(500, `Agent resume failed: ${errorMessage(err)}`);
-	}
+	return json({ chatId, runId: agentRun.id, status: 'queued' });
 }

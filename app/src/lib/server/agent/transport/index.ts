@@ -1,7 +1,5 @@
 // ---------------------------------------------------------------------------
-// agent/transport/index.ts — Unified transport dispatch
+// agent/transport/index.ts — Transport exports (background-only)
 // ---------------------------------------------------------------------------
 
-export { buildSyncResponse, type SyncAgentResponse } from './sync';
-export { buildStreamResponse } from './stream';
 export { startBackgroundRun, type BackgroundRunResult } from './background';

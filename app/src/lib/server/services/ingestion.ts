@@ -15,6 +15,27 @@ import {
 const CHUNK_SIZE = 1200;
 const CHUNK_OVERLAP = 200;
 const UPSERT_BATCH_SIZE = 32;
+const EMBED_MAX_RETRIES = 3;
+const EMBED_RETRY_DELAY_MS = 1000;
+
+/** Embed a text chunk with retries for transient network failures. */
+async function embedWithRetry(
+	chunk: string,
+	retries = EMBED_MAX_RETRIES
+): Promise<{ vector: number[]; provider: string }> {
+	let lastError: unknown;
+	for (let attempt = 0; attempt <= retries; attempt++) {
+		try {
+			return await embedText(chunk, 'passage');
+		} catch (err) {
+			lastError = err;
+			if (attempt < retries) {
+				await new Promise((r) => setTimeout(r, EMBED_RETRY_DELAY_MS * (attempt + 1)));
+			}
+		}
+	}
+	throw lastError;
+}
 
 interface IngestCounters {
 	filesScanned: number;
@@ -128,7 +149,7 @@ async function ingestOneFile(
 	const points: BrainPoint[] = [];
 	for (let index = 0; index < chunks.length; index++) {
 		const chunk = chunks[index];
-		const { vector, provider } = await embedText(chunk);
+		const { vector, provider } = await embedWithRetry(chunk);
 		const pointId = createPointId(`${relativePath}#${index}`);
 		const payload: {
 			path: string;
@@ -221,7 +242,10 @@ export async function ingestDirectoryByRootIndex(
 		errors: []
 	};
 
-	for (const filePath of allFiles) {
+	for (const [i, filePath] of allFiles.entries()) {
+		if (i > 0 && i % 50 === 0) {
+			console.log(`[ingest] Progress: ${i}/${allFiles.length} files (${counters.filesIndexed} indexed, ${counters.errors.length} errors)`);
+		}
 		try {
 			const result = await ingestOneFile(filePath, workspaceId);
 			if (result.status === 'indexed') {

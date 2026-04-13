@@ -58,3 +58,16 @@ export async function takePendingConfirmation(
 		payload: row.payload as unknown as PendingAgentPayload
 	};
 }
+
+/** Remove expired PendingToolConfirmation rows. */
+export async function cleanupExpiredConfirmations(): Promise<number> {
+	const result = await db.pendingToolConfirmation.deleteMany({
+		where: { expiresAt: { lte: new Date() } }
+	});
+	return result.count;
+}
+
+// Proactively clean up expired confirmations every 10 minutes
+setInterval(() => {
+	cleanupExpiredConfirmations().catch(() => {});
+}, 10 * 60 * 1000).unref();

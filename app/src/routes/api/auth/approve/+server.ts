@@ -9,6 +9,7 @@ import {
 	ADMIN_RATE_LIMIT,
 	operationFailedResponse
 } from '$lib/server/api';
+import { invalidateUserCache } from '../../../../hooks.server';
 import type { RequestHandler } from './$types';
 
 // POST /api/auth/approve — admin only, approves a pending user
@@ -40,7 +41,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		return operationFailedResponse(`Approve failed for target=${userId} by actor=${admin.id}`);
 	}
 
-	// Audit log — persisted and cannot be bypassed
+	invalidateUserCache(userId);
 	await audit({
 		action: 'USER_APPROVED',
 		actorId: admin.id,
@@ -73,6 +74,8 @@ export const DELETE: RequestHandler = async ({ request, locals }) => {
 	if (result.count === 0) {
 		return operationFailedResponse(`Reject failed for target=${userId} by actor=${admin.id}`);
 	}
+
+	invalidateUserCache(userId);
 
 	await audit({
 		action: 'USER_REJECTED',

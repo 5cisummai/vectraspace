@@ -24,6 +24,7 @@
 		},
 		{
 			title: 'Smart Search',
+			href: '/search',
 			icon: MagnifyingGlassIcon
 		},
 		{

@@ -7,7 +7,7 @@ import type { RequestHandler } from './$types';
 const ALLOWED_MEDIA_TYPES: MediaType[] = ['video', 'audio', 'image', 'document', 'other'];
 
 export const GET: RequestHandler = async (event) => {
-	await requireWorkspaceAccess(event);
+	const { workspaceId } = await requireWorkspaceAccess(event);
 
 	const query = (event.url.searchParams.get('q') ?? '').trim();
 	if (!query) throw error(400, 'Missing query parameter: q');
@@ -35,7 +35,13 @@ export const GET: RequestHandler = async (event) => {
 			: undefined;
 
 	try {
-		const results = await semanticSearch(query, { mediaType, rootIndex, limit, minScore });
+		const results = await semanticSearch(query, {
+			workspaceId,
+			mediaType,
+			rootIndex,
+			limit,
+			minScore
+		});
 		return json({
 			query,
 			count: results.length,

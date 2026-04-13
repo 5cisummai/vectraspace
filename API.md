@@ -338,21 +338,21 @@ Each **SearchResult** item:
 
 **Auth**: Required; workspace **member** or higher.
 
-Runs a **server-side agent loop** (up to 20 iterations) with tool calling (`search`, `list_directory`, `get_file_info`, `read_file`, `search_by_metadata`, and optional mutating tools with confirmation). Chats and agent runs are scoped to `{workspaceId}`.
+Runs a **server-side agent loop** (up to 40 iterations) with tool calling (`search`, `list_directory`, `get_file_info`, `read_file`, `search_by_metadata`, and optional mutating tools with confirmation). Chats and agent runs are scoped to `{workspaceId}`.
 
 **Body**:
 
-| Field      | Type    | Required | Description                                                      |
-| ---------- | ------- | -------- | ---------------------------------------------------------------- |
-| `question` | string  | yes*     | User question (*omit when `regenerate: true` — server uses last user message) |
-| `chatId`   | string  | no       | Existing chat; omit to create a new session                      |
-| `history`  | array   | no       | Prior turns (usually loaded from DB when `chatId` is set)        |
-| `filters`  | object  | no       | Default scope for semantic `search` tool                         |
-| `stream`   | boolean | no       | If `true`, NDJSON stream; if false/omitted, sync JSON (unless `background`) |
-| `background` | boolean | no     | If `true`, returns `{ chatId, runId, status }` and runs async    |
-| `regenerate` | boolean | no    | Replay last user message in `chatId`                             |
-| `maxHistoryMessages` | number | no | Trim prior context                                             |
-| `autoApproveToolNames` | string[] | no | Client opt-in for mutating tools (server-whitelisted names)   |
+| Field                  | Type     | Required | Description                                                                    |
+| ---------------------- | -------- | -------- | ------------------------------------------------------------------------------ |
+| `question`             | string   | yes\*    | User question (\*omit when `regenerate: true` — server uses last user message) |
+| `chatId`               | string   | no       | Existing chat; omit to create a new session                                    |
+| `history`              | array    | no       | Prior turns (usually loaded from DB when `chatId` is set)                      |
+| `filters`              | object   | no       | Default scope for semantic `search` tool                                       |
+| `stream`               | boolean  | no       | If `true`, NDJSON stream; if false/omitted, sync JSON (unless `background`)    |
+| `background`           | boolean  | no       | If `true`, returns `{ chatId, runId, status }` and runs async                  |
+| `regenerate`           | boolean  | no       | Replay last user message in `chatId`                                           |
+| `maxHistoryMessages`   | number   | no       | Trim prior context                                                             |
+| `autoApproveToolNames` | string[] | no       | Client opt-in for mutating tools (server-whitelisted names)                    |
 
 **filters** (optional; defaults applied when the model calls `search_files` without overriding):
 
@@ -584,14 +584,14 @@ Also removes matching `uploadedFile` rows and attempts semantic index cleanup fo
 
 Tool definitions live under `app/src/lib/server/agent/tools/`. The LLM may call tools such as:
 
-| Tool                 | Purpose                                                             |
-| -------------------- | ------------------------------------------------------------------- |
-| `search`             | Semantic search over the filename/metadata index (`semanticSearch`) |
-| `list_directory`     | List folder contents                                                |
-| `get_file_info`      | File or directory metadata                                          |
-| `read_file`          | Read text-oriented file content where supported                     |
-| `search_by_metadata` | Filter vector DB by metadata without a semantic query               |
-| `delete_file`, `move_file`, … | Mutating tools — may require UI confirmation (`needsApproval`) |
+| Tool                          | Purpose                                                             |
+| ----------------------------- | ------------------------------------------------------------------- |
+| `search`                      | Semantic search over the filename/metadata index (`semanticSearch`) |
+| `list_directory`              | List folder contents                                                |
+| `get_file_info`               | File or directory metadata                                          |
+| `read_file`                   | Read text-oriented file content where supported                     |
+| `search_by_metadata`          | Filter vector DB by metadata without a semantic query               |
+| `delete_file`, `move_file`, … | Mutating tools — may require UI confirmation (`needsApproval`)      |
 
 Clients do not invoke these directly; they are used inside `POST /api/workspaces/{workspaceId}/brain/ask`.
 

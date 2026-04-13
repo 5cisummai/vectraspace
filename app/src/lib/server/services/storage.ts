@@ -333,38 +333,14 @@ export async function readFileContent(
 }
 
 async function extractPdfText(fullPath: string): Promise<string | null> {
-	const endpoint = env.MULTIMODAL_EMBEDDING_URL?.replace('/embed', '/extract');
-	if (!endpoint) {
-		return null;
-	}
-
-	const bytes = await fs.readFile(fullPath);
-	const base64 = bytes.toString('base64');
-
-	const headers: Record<string, string> = {
-		'Content-Type': 'application/json'
-	};
-	if (env.MULTIMODAL_EMBEDDING_API_KEY) {
-		headers.Authorization = `Bearer ${env.MULTIMODAL_EMBEDDING_API_KEY}`;
-	}
-
 	try {
-		const response = await fetch(endpoint, {
-			method: 'POST',
-			headers,
-			body: JSON.stringify({
-				type: 'pdf',
-				fileBase64: base64,
-				filename: path.basename(fullPath)
-			})
-		});
-
-		if (!response.ok) {
-			return null;
-		}
-
-		const data = (await response.json()) as { text?: string };
-		return data.text ?? null;
+		const { PDFParse } = await import('pdf-parse');
+		const buffer = await fs.readFile(fullPath);
+		const parser = new PDFParse({ data: new Uint8Array(buffer) });
+		const result = await parser.getText();
+		const text = result.text?.trim();
+		parser.destroy();
+		return text ? text.slice(0, 50000) : null;
 	} catch {
 		return null;
 	}

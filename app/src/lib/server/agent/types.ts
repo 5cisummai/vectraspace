@@ -113,15 +113,12 @@ export interface AgentMetaPayload {
 // Run configuration (passed to public API)
 // ---------------------------------------------------------------------------
 
-export type TransportMode = 'sync' | 'stream' | 'background';
-
 export interface AgentRunConfig {
 	userId: string;
 	isAdmin: boolean;
 	chatId?: string;
 	/** Required — agent runs are always scoped to a workspace. */
 	workspaceId: string;
-	mode: TransportMode;
 	/** When true, replay the last user message instead of appending a new one. */
 	regenerate?: boolean;
 	/** Limit context window to N most recent messages. */
@@ -137,7 +134,6 @@ export interface ConfirmRunConfig {
 	approved: boolean;
 	chatId?: string;
 	workspaceId: string;
-	mode: TransportMode;
 	autoApproveToolNames?: string[];
 }
 
@@ -147,4 +143,4 @@ export interface ConfirmRunConfig {
 
 export const DEFAULT_LIMIT = 8;
 export const DEFAULT_MIN_SCORE = 0.5;
-export const MAX_AGENT_ITERATIONS = 20;
+export const MAX_AGENT_ITERATIONS = 40;

@@ -34,6 +34,7 @@ interface Subscription {
 	id: number;
 	workspaceId: string;
 	listener: WorkspaceEventListener;
+	lastActivity: number;
 }
 
 let nextId = 1;
@@ -42,13 +43,32 @@ const subscriptions = new Map<number, Subscription>();
 // Index: workspaceId → subscription ids (for fast dispatch)
 const workspaceIndex = new Map<string, Set<number>>();
 
+const SUBSCRIPTION_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const SWEEP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
+function sweepStaleSubscriptions(): void {
+	const cutoff = Date.now() - SUBSCRIPTION_TTL_MS;
+	for (const [id, sub] of subscriptions) {
+		if (sub.lastActivity < cutoff) {
+			subscriptions.delete(id);
+			const s = workspaceIndex.get(sub.workspaceId);
+			if (s) {
+				s.delete(id);
+				if (s.size === 0) workspaceIndex.delete(sub.workspaceId);
+			}
+		}
+	}
+}
+
+setInterval(sweepStaleSubscriptions, SWEEP_INTERVAL_MS).unref?.();
+
 /**
  * Subscribe to events for a specific workspace.
  * Returns an unsubscribe function.
  */
 export function subscribe(workspaceId: string, listener: WorkspaceEventListener): () => void {
 	const id = nextId++;
-	subscriptions.set(id, { id, workspaceId, listener });
+	subscriptions.set(id, { id, workspaceId, listener, lastActivity: Date.now() });
 
 	let wsSet = workspaceIndex.get(workspaceId);
 	if (!wsSet) {
@@ -84,6 +104,7 @@ export function emit(workspaceId: string, type: string, data: Record<string, unk
 	for (const id of subIds) {
 		const sub = subscriptions.get(id);
 		if (sub) {
+			sub.lastActivity = Date.now();
 			try {
 				sub.listener(event);
 			} catch {

@@ -70,8 +70,45 @@ function emit(run: AgentRunRecord): void {
 	}
 }
 
+/** Emit a real-time step event via SSE so the client can show tool progress. */
+export function emitRunStep(
+	workspaceId: string | null,
+	chatId: string,
+	runId: string,
+	step: { type: string; tool?: string; args?: Record<string, unknown>; resultSummary?: string }
+): void {
+	if (workspaceId) {
+		emitWorkspaceEvent(workspaceId, 'run.step', {
+			chatId,
+			runId,
+			step
+		});
+	}
+}
+
 // In-memory tool stream logs (ephemeral — only needed while run is active)
 const toolStreamLogs = new Map<string, BackgroundToolStreamEntry[]>();
+
+/** Periodic cleanup: remove toolStreamLog entries for runs older than 1 hour */
+const STALE_LOG_TTL_MS = 60 * 60 * 1000;
+const staleLogTimestamps = new Map<string, number>();
+
+function touchLogTimestamp(runId: string): void {
+	staleLogTimestamps.set(runId, Date.now());
+}
+
+function cleanupStaleToolStreamLogs(): void {
+	const now = Date.now();
+	for (const [runId, ts] of staleLogTimestamps) {
+		if (now - ts > STALE_LOG_TTL_MS) {
+			toolStreamLogs.delete(runId);
+			staleLogTimestamps.delete(runId);
+		}
+	}
+}
+
+// Run cleanup every 5 minutes
+setInterval(cleanupStaleToolStreamLogs, 5 * 60 * 1000).unref();
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -132,6 +169,7 @@ export async function createAgentRun(
 	});
 	const record = toRecord(row);
 	toolStreamLogs.set(row.id, []);
+	touchLogTimestamp(row.id);
 	emit(record);
 	return record;
 }
@@ -143,6 +181,7 @@ export async function markRunRunning(runId: string): Promise<AgentRunRecord | nu
 			data: { status: 'RUNNING', error: null }
 		});
 		toolStreamLogs.set(runId, []);
+		touchLogTimestamp(runId);
 		const record = toRecord(row);
 		emit(record);
 		return record;
@@ -190,6 +229,7 @@ export async function markRunDone(runId: string): Promise<AgentRunRecord | null>
 			}
 		});
 		toolStreamLogs.delete(runId);
+		staleLogTimestamps.delete(runId);
 		const record = toRecord(row);
 		emit(record);
 		return record;
@@ -212,6 +252,7 @@ export async function markRunFailed(
 			}
 		});
 		toolStreamLogs.delete(runId);
+		staleLogTimestamps.delete(runId);
 		const record = toRecord(row);
 		emit(record);
 		return record;

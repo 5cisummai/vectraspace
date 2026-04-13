@@ -13,7 +13,8 @@ import {
 	markRunAwaitingConfirmation,
 	appendRunToolStreamEvent,
 	supersedeOtherRunsForChat,
-	appendRunStep
+	appendRunStep,
+	emitRunStep
 } from '$lib/server/agent-runs';
 import type { AgentAppContext } from '../context';
 import type { AgentRequest, AgentEvent } from '../types';
@@ -58,12 +59,22 @@ export async function startBackgroundRun(
 					timestamp: new Date().toISOString(),
 					data: { tool: event.tool, args: event.args }
 				});
+				emitRunStep(appCtx.workspaceId ?? null, opts.chatId, run.id, {
+					type: 'tool_call',
+					tool: event.tool,
+					args: event.args
+				});
 			}
 			if (event.type === 'tool_done') {
 				void appendRunStep(run.id, {
 					type: 'tool_result',
 					timestamp: new Date().toISOString(),
 					data: { tool: event.tool, resultSummary: event.resultSummary }
+				});
+				emitRunStep(appCtx.workspaceId ?? null, opts.chatId, run.id, {
+					type: 'tool_result',
+					tool: event.tool,
+					resultSummary: event.resultSummary
 				});
 			}
 		};
