@@ -53,8 +53,7 @@ function makeNeedsApproval(toolName: string) {
 
 export const deleteFileTool = tool({
 	name: 'delete_file',
-	description:
-		'Permanently delete a file or folder under a media root. Requires user confirmation before it runs.',
+	description: 'Permanently delete a file or folder under a media root.',
 	parameters: z.object({
 		path: z.string().describe('Path in rootIndex/path format (e.g. "0/photos/old.jpg").')
 	}),
@@ -66,60 +65,71 @@ export const deleteFileTool = tool({
 });
 
 // ---------------------------------------------------------------------------
-// move_file
+// move (single path or batch into a directory)
 // ---------------------------------------------------------------------------
 
-export const moveFileTool = tool({
-	name: 'move_file',
-	description:
-		'Move or rename a file or folder within the same media root. Destination must not exist. Requires user confirmation.',
-	parameters: z.object({
-		source_path: z.string().describe('Current path in rootIndex/path format.'),
-		destination_path: z
-			.string()
-			.describe('New path in the same root (e.g. move "0/a.txt" to "0/archive/a.txt").')
-	}),
-	needsApproval: makeNeedsApproval('move_file'),
-	execute: makeMutatingExecute('move_file', async ({ source_path, destination_path }, ctx) => {
-		if (!source_path || !destination_path)
-			return 'Error: move_file requires "source_path" and "destination_path".';
-		return moveMediaPath(source_path, destination_path, {
-			userId: ctx.userId,
-			isAdmin: ctx.isAdmin
-		});
-	})
+const moveParameters = z.object({
+	source_path: z
+		.string()
+		.optional()
+		.describe(
+			'Single move/rename: current path in rootIndex/path format. Omit when using batch fields.'
+		),
+	destination_path: z
+		.string()
+		.optional()
+		.describe(
+			'Single move/rename: new full path in the same root. Destination must not exist. Omit when using batch fields.'
+		),
+	source_paths: z
+		.array(z.string())
+		.optional()
+		.describe(
+			'Batch move: list of source paths (e.g. ["0/inbox/a.mp4"]). Each item keeps its basename in the destination folder.'
+		),
+	destination_directory: z
+		.string()
+		.optional()
+		.describe(
+			'Batch move: existing destination directory in rootIndex/path format. Omit when using single-path fields.'
+		)
 });
 
-// ---------------------------------------------------------------------------
-// move_files (bulk)
-// ---------------------------------------------------------------------------
-
-export const moveFilesTool = tool({
-	name: 'move_files',
+export const moveTool = tool({
+	name: 'move',
 	description:
-		'Move many files/folders into a destination directory within the same media root in one action. Each source keeps its original name. Requires user confirmation.',
-	parameters: z.object({
-		source_paths: z
-			.array(z.string())
-			.describe(
-				'List of source paths in rootIndex/path format (e.g. ["0/inbox/a.mp4", "0/inbox/b.mp4"]).'
-			),
-		destination_directory: z
-			.string()
-			.describe('Existing destination directory in rootIndex/path format (e.g. "0/archive").')
-	}),
-	needsApproval: makeNeedsApproval('move_files'),
-	execute: makeMutatingExecute(
-		'move_files',
-		async ({ source_paths, destination_directory }, ctx) => {
-			if (!source_paths.length || !destination_directory)
-				return 'Error: move_files requires "source_paths" (string[]) and "destination_directory" (string).';
-			return moveManyMediaPaths(source_paths, destination_directory, {
+		'Move or rename within the same media root. Use either (1) source_path + destination_path for one item, or (2) source_paths + destination_directory to move many items into one folder (each keeps its name).',
+	parameters: moveParameters,
+	needsApproval: makeNeedsApproval('move'),
+	execute: makeMutatingExecute('move', async (args, ctx) => {
+		const batch =
+			Array.isArray(args.source_paths) &&
+			args.source_paths.length > 0 &&
+			typeof args.destination_directory === 'string' &&
+			args.destination_directory.length > 0;
+		const single =
+			typeof args.source_path === 'string' &&
+			args.source_path.length > 0 &&
+			typeof args.destination_path === 'string' &&
+			args.destination_path.length > 0;
+
+		if (batch && single) {
+			return 'Error: move: use either source_path+destination_path OR source_paths+destination_directory, not both.';
+		}
+		if (batch) {
+			return moveManyMediaPaths(args.source_paths!, args.destination_directory!, {
 				userId: ctx.userId,
 				isAdmin: ctx.isAdmin
 			});
 		}
-	)
+		if (single) {
+			return moveMediaPath(args.source_path!, args.destination_path!, {
+				userId: ctx.userId,
+				isAdmin: ctx.isAdmin
+			});
+		}
+		return 'Error: move requires either "source_path" and "destination_path", or non-empty "source_paths" and "destination_directory".';
+	})
 });
 
 // ---------------------------------------------------------------------------
@@ -129,7 +139,7 @@ export const moveFilesTool = tool({
 export const copyFileTool = tool({
 	name: 'copy_file',
 	description:
-		'Copy a file or folder to a new path within the same root. Destination must not exist. Requires user confirmation.',
+		'Copy a file or folder to a new path within the same root. Destination must not exist.',
 	parameters: z.object({
 		source_path: z.string().describe('Source path in rootIndex/path format.'),
 		destination_path: z.string().describe('Destination path in the same root.')
@@ -151,8 +161,7 @@ export const copyFileTool = tool({
 
 export const mkdirTool = tool({
 	name: 'mkdir',
-	description:
-		'Create a new directory under a media root. Parent must exist. Requires user confirmation.',
+	description: 'Create a new directory under a media root. Parent must exist.',
 	parameters: z.object({
 		path: z.string().describe('Directory path to create (e.g. "0/incoming/2026").')
 	}),

@@ -2,6 +2,7 @@ export { requireAuth, requireAdmin, type AuthenticatedUser } from './auth-guard'
 export { parseBody } from './validation';
 export {
 	approveUserSchema,
+	updateAppUserRoleSchema,
 	loginSchema,
 	signupSchema,
 	addMemberSchema,

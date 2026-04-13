@@ -1,5 +1,5 @@
 // Whitelist: only tools that can require confirmation (mutations).
-const AUTO_APPROVABLE = new Set(['delete_file', 'move_file', 'move_files', 'copy_file', 'mkdir']);
+const AUTO_APPROVABLE = new Set(['delete_file', 'move', 'copy_file', 'mkdir']);
 
 const MAX_NAMES = 32;
 const MAX_LEN = 64;
@@ -14,7 +14,8 @@ export function normalizeAutoApproveToolNames(raw: unknown): string[] | undefine
 	const seen = new Set<string>();
 	for (const x of raw) {
 		if (typeof x !== 'string') continue;
-		const n = x.trim().slice(0, MAX_LEN);
+		let n = x.trim().slice(0, MAX_LEN);
+		if (n === 'move_file' || n === 'move_files') n = 'move';
 		if (!n || !AUTO_APPROVABLE.has(n) || seen.has(n)) continue;
 		seen.add(n);
 		out.push(n);
@@ -29,8 +30,11 @@ export function shouldAutoApproveTool(
 ): boolean {
 	if (!autoApproveToolNames?.length) return false;
 	if (autoApproveToolNames.includes(toolName)) return true;
-	// One "Move" opt-in covers both single and batch move tools.
-	const movePair =
-		toolName === 'move_files' ? 'move_file' : toolName === 'move_file' ? 'move_files' : null;
-	return movePair !== null && autoApproveToolNames.includes(movePair);
+	// Legacy stored names from before move_file/move_files were unified.
+	if (toolName === 'move') {
+		return (
+			autoApproveToolNames.includes('move_file') && autoApproveToolNames.includes('move_files')
+		);
+	}
+	return false;
 }

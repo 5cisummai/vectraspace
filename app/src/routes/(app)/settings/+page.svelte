@@ -9,6 +9,9 @@
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import * as Progress from '$lib/components/ui/progress/index.js';
 	import { apiFetch } from '$lib/api-fetch';
+	import * as Select from '$lib/components/ui/select/index.js';
+	import * as Dialog from '$lib/components/ui/dialog/index.js';
+	import { toast } from 'svelte-sonner';
 	import FolderIcon from '@lucide/svelte/icons/folder';
 	import UsersIcon from '@lucide/svelte/icons/users';
 	import InfoIcon from '@lucide/svelte/icons/info';
@@ -44,6 +47,19 @@
 	const users = $derived(data.users);
 	const pendingUsers = $derived(data.pendingUsers);
 	const isAdmin = $derived(data.isAdmin);
+	const currentUserId = $derived(data.currentUserId);
+	const adminAccountCount = $derived(users.filter((u) => u.role === 'ADMIN').length);
+
+	let deactivateTargetId = $state<string | null>(null);
+	let deactivateDialogOpen = $state(false);
+	const deactivateTarget = $derived(
+		deactivateTargetId ? users.find((u) => u.id === deactivateTargetId) : undefined
+	);
+
+	function openDeactivateDialog(userId: string) {
+		deactivateTargetId = userId;
+		deactivateDialogOpen = true;
+	}
 	let reindexing = $state(false);
 	let reindexStatus = $state<'idle' | 'success' | 'error'>('idle');
 
@@ -97,6 +113,57 @@
 		} catch (e) {
 			console.error('Failed to reject user', e);
 		}
+	}
+
+	async function updateAppRole(userId: string, role: 'ADMIN' | 'USER') {
+		try {
+			const res = await apiFetch(`/api/auth/users/${userId}`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ role })
+			});
+			if (res.ok) {
+				toast.success('Server role updated');
+				await invalidateAll();
+			} else {
+				const err = (await res.json().catch(() => null)) as { error?: string } | null;
+				toast.error(err?.error ?? 'Could not update role');
+			}
+		} catch (e) {
+			console.error('Failed to update user role', e);
+			toast.error('Could not update role');
+		}
+	}
+
+	async function deactivateAccount() {
+		if (!deactivateTargetId) return;
+		const id = deactivateTargetId;
+		try {
+			const res = await apiFetch(`/api/auth/users/${id}`, { method: 'DELETE' });
+			deactivateDialogOpen = false;
+			deactivateTargetId = null;
+			if (res.ok) {
+				toast.success('Account deactivated');
+				await invalidateAll();
+			} else {
+				const err = (await res.json().catch(() => null)) as { error?: string } | null;
+				toast.error(err?.error ?? 'Could not deactivate account');
+			}
+		} catch (e) {
+			console.error('Failed to deactivate user', e);
+			toast.error('Could not deactivate account');
+		}
+	}
+
+	function canDemoteServerAdmin(user: { id: string; role: string }): boolean {
+		if (user.role !== 'ADMIN') return true;
+		return adminAccountCount > 1;
+	}
+
+	function canDeactivate(user: { id: string; role: string }): boolean {
+		if (user.id === currentUserId) return false;
+		if (user.role === 'ADMIN' && adminAccountCount <= 1) return false;
+		return true;
 	}
 
 	async function reindex() {
@@ -339,69 +406,160 @@
 			</Tabs.Content>
 
 			<Tabs.Content value="users" class="space-y-4">
-				<div class="rounded-md border">
-					<Table.Root>
-						<Table.Header>
-							<Table.Row>
-								<Table.Head>Username</Table.Head>
-								<Table.Head>Display Name</Table.Head>
-								<Table.Head>Role</Table.Head>
-								<Table.Head>Status</Table.Head>
-							</Table.Row>
-						</Table.Header>
-						<Table.Body>
-							{#each users as user}
-								<Table.Row>
-									<Table.Cell>{user.username}</Table.Cell>
-									<Table.Cell>{user.displayName}</Table.Cell>
-									<Table.Cell>
-										<Badge variant={user.role === 'ADMIN' ? 'default' : 'secondary'}>
-											{user.role}
-										</Badge>
-									</Table.Cell>
-									<Table.Cell>
-										<Badge variant={user.approved ? 'outline' : 'secondary'}>
-											{user.approved ? 'Active' : 'Pending'}
-										</Badge>
-									</Table.Cell>
-								</Table.Row>
-							{/each}
-						</Table.Body>
-					</Table.Root>
-				</div>
+				<Card class="space-y-2 p-4">
+					<h3 class="text-sm font-medium">Server accounts vs workspace members</h3>
+					<p class="text-sm text-muted-foreground">
+						<strong class="font-medium text-foreground">Users (this tab)</strong> are login accounts for
+						this app: who can sign in, who is a <em>server</em> administrator (settings, storage,
+						reindex, approving signups), and account status.
+					</p>
+					<p class="text-sm text-muted-foreground">
+						<strong class="font-medium text-foreground">Workspace members</strong> are managed under
+						<a href="/workspace" class="font-medium text-primary underline underline-offset-4"
+							>Workspace settings</a
+						>: who may access each workspace’s chats and files, and their role <em>inside that
+							workspace</em> (Admin, Member, Viewer). Someone can be a server user without being in a
+						workspace, or belong to several workspaces with different roles.
+					</p>
+				</Card>
 
-				{#if isAdmin && pendingUsers.length > 0}
-					<div class="space-y-3">
-						<h3 class="text-sm font-medium">Pending Users</h3>
-						{#each pendingUsers as pending}
-							<Card class="flex items-center justify-between p-4">
-								<div>
-									<p class="font-medium">{pending.displayName}</p>
-									<p class="text-sm text-muted-foreground">@{pending.username}</p>
-								</div>
-								<div class="flex gap-2">
-									<Button
-										variant="outline"
-										size="sm"
-										class="border-green-500/30 text-green-600 hover:bg-green-500/10"
-										onclick={() => approveUser(pending.id)}
-									>
-										<CheckIcon class="size-4" />
-										Accept
-									</Button>
-									<Button
-										variant="outline"
-										size="sm"
-										class="border-destructive/30 text-destructive hover:bg-destructive/10"
-										onclick={() => rejectUser(pending.id)}
-									>
-										<XIcon class="size-4" />
-										Reject
-									</Button>
-								</div>
-							</Card>
-						{/each}
+				{#if isAdmin}
+					<div class="rounded-md border">
+						<Table.Root>
+							<Table.Header>
+								<Table.Row>
+									<Table.Head>Username</Table.Head>
+									<Table.Head>Display name</Table.Head>
+									<Table.Head>Server role</Table.Head>
+									<Table.Head>Status</Table.Head>
+									<Table.Head class="w-[220px] text-right">Actions</Table.Head>
+								</Table.Row>
+							</Table.Header>
+							<Table.Body>
+								{#each users as user}
+									<Table.Row>
+										<Table.Cell class="font-mono text-xs">{user.username}</Table.Cell>
+										<Table.Cell>{user.displayName}</Table.Cell>
+										<Table.Cell>
+											{#if user.id === currentUserId || (user.role === 'ADMIN' && !canDemoteServerAdmin(user))}
+												<Badge variant={user.role === 'ADMIN' ? 'default' : 'secondary'}>
+													{user.role}
+												</Badge>
+											{:else}
+												<Select.Root
+													type="single"
+													value={user.role}
+													onValueChange={(val) => {
+														if (val === 'ADMIN' || val === 'USER') updateAppRole(user.id, val);
+													}}
+												>
+													<Select.Trigger class="w-32" size="sm">
+														{user.role}
+													</Select.Trigger>
+													<Select.Content>
+														<Select.Item value="ADMIN">ADMIN</Select.Item>
+														<Select.Item value="USER" disabled={!canDemoteServerAdmin(user)}
+															>USER</Select.Item
+														>
+													</Select.Content>
+												</Select.Root>
+											{/if}
+										</Table.Cell>
+										<Table.Cell>
+											<Badge variant={user.approved ? 'outline' : 'secondary'}>
+												{user.approved ? 'Active' : 'Pending'}
+											</Badge>
+										</Table.Cell>
+										<Table.Cell class="text-right">
+											<Button
+												variant="outline"
+												size="sm"
+												class="border-destructive/30 text-destructive hover:bg-destructive/10"
+												disabled={!canDeactivate(user)}
+												onclick={() => openDeactivateDialog(user.id)}
+											>
+												Deactivate
+											</Button>
+										</Table.Cell>
+									</Table.Row>
+								{/each}
+							</Table.Body>
+						</Table.Root>
 					</div>
+
+					<Dialog.Root
+						bind:open={deactivateDialogOpen}
+						onOpenChange={(open) => {
+							if (!open) deactivateTargetId = null;
+						}}
+					>
+						<Dialog.Content>
+							<Dialog.Header>
+								<Dialog.Title>Deactivate account?</Dialog.Title>
+								<Dialog.Description>
+									{#if deactivateTarget}
+										This signs out <span class="font-medium text-foreground"
+											>{deactivateTarget.displayName}</span
+										>
+										(<span class="font-mono text-xs">@{deactivateTarget.username}</span>) and blocks
+										further sign-ins for this server account.
+									{/if}
+								</Dialog.Description>
+							</Dialog.Header>
+							<Dialog.Footer>
+								<Button
+									variant="outline"
+									onclick={() => {
+										deactivateDialogOpen = false;
+										deactivateTargetId = null;
+									}}>Cancel</Button
+								>
+								<Button variant="destructive" onclick={deactivateAccount}>Deactivate</Button>
+							</Dialog.Footer>
+						</Dialog.Content>
+					</Dialog.Root>
+
+					{#if pendingUsers.length > 0}
+						<div class="space-y-3">
+							<h3 class="text-sm font-medium">Pending signups</h3>
+							{#each pendingUsers as pending}
+								<Card class="flex items-center justify-between p-4">
+									<div>
+										<p class="font-medium">{pending.displayName}</p>
+										<p class="text-sm text-muted-foreground">@{pending.username}</p>
+									</div>
+									<div class="flex gap-2">
+										<Button
+											variant="outline"
+											size="sm"
+											class="border-green-500/30 text-green-600 hover:bg-green-500/10"
+											onclick={() => approveUser(pending.id)}
+										>
+											<CheckIcon class="size-4" />
+											Accept
+										</Button>
+										<Button
+											variant="outline"
+											size="sm"
+											class="border-destructive/30 text-destructive hover:bg-destructive/10"
+											onclick={() => rejectUser(pending.id)}
+										>
+											<XIcon class="size-4" />
+											Reject
+										</Button>
+									</div>
+								</Card>
+							{/each}
+						</div>
+					{/if}
+				{:else}
+					<p class="text-sm text-muted-foreground">
+						Only server administrators can view and change accounts here. Workspace membership is
+						managed in
+						<a href="/workspace" class="font-medium text-primary underline underline-offset-4"
+							>Workspace settings</a
+						>.
+					</p>
 				{/if}
 			</Tabs.Content>
 

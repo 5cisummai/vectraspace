@@ -52,6 +52,15 @@ export const workspaceDescriptionSchema = z
 
 export const approveUserSchema = z.object({ userId: cuidSchema }).strict(); // Reject unexpected fields (mass assignment protection)
 
+/** App-level user role (login / server administration), not workspace role */
+export const appUserRoleSchema = z.enum(['ADMIN', 'USER']);
+
+export const updateAppUserRoleSchema = z
+	.object({
+		role: appUserRoleSchema
+	})
+	.strict();
+
 export const loginSchema = z
 	.object({
 		username: z.string().min(1, 'Username is required').max(64),

@@ -105,9 +105,8 @@
 			read_file: 'Reading file',
 			get_file_info: 'Checking file',
 			search_by_metadata: 'Filtering files',
-			move_files: 'Moving files (needs your approval)',
 			delete_file: 'Delete (needs your approval)',
-			move_file: 'Move (needs your approval)',
+			move: 'Move (needs your approval)',
 			copy_file: 'Copy (needs your approval)',
 			mkdir: 'Create folder (needs your approval)'
 		};
@@ -169,8 +168,7 @@
 	function actionTitleForTool(name: string): string {
 		const map: Record<string, string> = {
 			delete_file: 'Delete',
-			move_file: 'Move',
-			move_files: 'Move (batch)',
+			move: 'Move',
 			copy_file: 'Copy',
 			mkdir: 'Create folder'
 		};
@@ -189,11 +187,19 @@
 			if (tool === 'delete_file' && typeof args.path === 'string') return args.path;
 			if (tool === 'mkdir' && typeof args.path === 'string') return args.path;
 			if (
-				(tool === 'move_file' || tool === 'copy_file') &&
+				(tool === 'move' || tool === 'copy_file') &&
 				typeof args.source_path === 'string' &&
 				typeof args.destination_path === 'string'
 			) {
 				return `${args.source_path} → ${args.destination_path}`;
+			}
+			if (
+				tool === 'move' &&
+				Array.isArray(args.source_paths) &&
+				typeof args.destination_directory === 'string'
+			) {
+				const n = args.source_paths.length;
+				return `${n} path(s) → ${args.destination_directory}`;
 			}
 			return JSON.stringify(args, null, 2);
 		} catch {

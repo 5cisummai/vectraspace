@@ -52,7 +52,7 @@ export function getAutoApproveToolNames(): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// Settings UI: grouped options (move = move_file + move_files)
+// Settings UI: grouped options (move = unified `move` tool)
 // ---------------------------------------------------------------------------
 
 export type AutoApproveSettingId = 'delete_file' | 'move' | 'copy_file' | 'mkdir';
@@ -85,19 +85,29 @@ export const AUTO_APPROVE_SETTINGS: Array<{
 ];
 
 function toolsForSetting(id: AutoApproveSettingId): string[] {
-	if (id === 'move') return ['move_file', 'move_files'];
+	if (id === 'move') return ['move'];
 	return [id];
 }
+
+const LEGACY_MOVE_NAMES = ['move_file', 'move_files'] as const;
 
 /** True when every tool for this setting is present in storage. */
 export function isAutoApproveSettingEnabled(id: AutoApproveSettingId): boolean {
 	const cur = parseStored();
+	if (id === 'move') {
+		return cur.includes('move') || (cur.includes('move_file') && cur.includes('move_files'));
+	}
 	return toolsForSetting(id).every((t) => cur.includes(t));
 }
 
 export function setAutoApproveSettingEnabled(id: AutoApproveSettingId, enabled: boolean): void {
 	const tools = toolsForSetting(id);
-	let cur = parseStored().filter((x) => !tools.includes(x));
+	let cur = parseStored();
+	if (id === 'move') {
+		cur = cur.filter((x) => x !== 'move' && !LEGACY_MOVE_NAMES.includes(x as (typeof LEGACY_MOVE_NAMES)[number]));
+	} else {
+		cur = cur.filter((x) => !tools.includes(x));
+	}
 	if (enabled) {
 		cur = [...cur, ...tools];
 	}
@@ -108,7 +118,7 @@ export function addAutoApproveToolName(toolName: string): void {
 	if (typeof localStorage === 'undefined') return;
 	const t = toolName.trim().slice(0, 64);
 	if (!t) return;
-	if (t === 'move_file' || t === 'move_files') {
+	if (t === 'move' || t === 'move_file' || t === 'move_files') {
 		setAutoApproveSettingEnabled('move', true);
 		return;
 	}

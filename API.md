@@ -299,6 +299,49 @@ Each **SearchResult** item:
 
 ---
 
+### Workspace — semantic search
+
+`GET /api/workspaces/{workspaceId}/search`
+
+**Auth**: Required; workspace **viewer** or higher.
+
+**Query parameters**: Same as `GET /api/search` (`q` required; optional `mediaType`, `root`, `limit`, `minScore`).
+
+**Success (200)**: Same JSON shape as `GET /api/search` (`query`, `count`, `results`).
+
+Vectors are stored and queried in Qdrant collection `ws_{workspaceId}_semantic` (separate from the global `QDRANT_COLLECTION` index).
+
+**Errors**: 400 if `q` missing, 403 if not a workspace member, 500 on search failure.
+
+---
+
+### Reindex workspace semantic collection (admin)
+
+`POST /api/workspaces/{workspaceId}/search/reindex`
+
+**Auth**: Required; global **ADMIN** (same privilege as `POST /api/search/reindex`). The `{workspaceId}` must exist.
+
+Rebuilds the **workspace** semantic index (`ws_{workspaceId}_semantic`) by scanning all media files and re-embedding, same logic as the admin reindex but scoped to `{workspaceId}`.
+
+**Success (200)**:
+
+```json
+{
+  "success": true,
+  "summary": {
+    "totalFiles": <number>,
+    "indexed": <number>,
+    "skipped": <number>,
+    "deleted": <number>,
+    "imageContentEmbeddingsUsed": <number>
+  }
+}
+```
+
+**Errors**: 401, 403 (non-admin), 404 (unknown workspace), 500.
+
+---
+
 ### Reindex semantic collection (admin)
 
 `POST /api/search/reindex`
@@ -591,7 +634,7 @@ Tool definitions live under `app/src/lib/server/agent/tools/`. The LLM may call 
 | `get_file_info`               | File or directory metadata                                          |
 | `read_file`                   | Read text-oriented file content where supported                     |
 | `search_by_metadata`          | Filter vector DB by metadata without a semantic query               |
-| `delete_file`, `move_file`, … | Mutating tools — may require UI confirmation (`needsApproval`)      |
+| `delete_file`, `move`, …      | Mutating tools — may require UI confirmation (`needsApproval`)      |
 
 Clients do not invoke these directly; they are used inside `POST /api/workspaces/{workspaceId}/brain/ask`.
 

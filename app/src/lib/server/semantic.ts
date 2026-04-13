@@ -526,6 +526,9 @@ export async function semanticSearch(
 	}
 ): Promise<SearchResult[]> {
 	const vector = (await embedText(query, 'query')).vector;
+	const coll = collectionName(options?.workspaceId);
+	await brain.ensureCollectionIfMissing(coll, vector.length);
+
 	const limit = Math.max(1, Math.min(options?.limit ?? 30, 100));
 	const minScore =
 		typeof options?.minScore === 'number'
@@ -541,7 +544,7 @@ export async function semanticSearch(
 		must.push({ key: 'rootIndex', match: { value: options.rootIndex } });
 	}
 
-	const rows = await brain.search(collectionName(options?.workspaceId), {
+	const rows = await brain.search(coll, {
 		vector,
 		limit,
 		filter: must.length > 0 ? { must } : undefined

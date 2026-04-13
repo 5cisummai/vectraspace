@@ -127,7 +127,7 @@ export async function moveMediaPath(
 	const srcRootIdx = parseRootIndex(source);
 	const dstRootIdx = parseRootIndex(destination);
 	if (srcRootIdx === null || dstRootIdx === null || srcRootIdx !== dstRootIdx) {
-		return 'Error: move_file only supports paths within the same media root.';
+		return 'Error: move only supports paths within the same media root.';
 	}
 
 	let stat;
@@ -204,7 +204,7 @@ export async function moveManyMediaPaths(
 		new Set(sources.map((s) => s.trim()).filter((s) => s.length > 0))
 	);
 	if (normalizedSources.length === 0) {
-		return 'Error: move_files requires at least one non-empty source path.';
+		return 'Error: move requires at least one non-empty source path.';
 	}
 
 	const dstDirResolved = resolveSafePath(destinationDirectory);
@@ -232,7 +232,7 @@ export async function moveManyMediaPaths(
 	for (const source of normalizedSources) {
 		const srcRootIdx = parseRootIndex(source);
 		if (srcRootIdx === null || srcRootIdx !== dstRootIdx) {
-			return 'Error: move_files only supports moving paths within the same media root.';
+			return 'Error: move only supports moving paths within the same media root.';
 		}
 	}
 

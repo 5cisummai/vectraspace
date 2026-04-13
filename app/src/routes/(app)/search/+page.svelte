@@ -3,11 +3,15 @@
 	import { goto } from '$app/navigation';
 	import { apiFetch } from '$lib/api-fetch';
 	import { workspaceStore } from '$lib/hooks/workspace.svelte';
+	import type { PageData } from './$types';
 	import FilePreviewTile from '$lib/components/file-browser/file-preview-tile.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
+	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
+
+	let { data }: { data: PageData } = $props();
 
 	type SemanticSearchResult = {
 		id: string;
@@ -27,6 +31,8 @@
 	let results = $state<SemanticSearchResult[]>([]);
 	let loading = $state(false);
 	let error = $state<string | null>(null);
+	let reindexing = $state(false);
+	let reindexMessage = $state<string | null>(null);
 
 	$effect(() => {
 		const q = page.url.searchParams.get('q')?.trim() ?? '';
@@ -104,6 +110,34 @@
 		goto(`/browse/media?file=${encodeURIComponent(path)}`, { keepFocus: true });
 	}
 
+	async function reindexWorkspace() {
+		const workspaceId = workspaceStore.activeId;
+		if (!workspaceId || reindexing) return;
+		reindexing = true;
+		reindexMessage = null;
+		try {
+			const res = await apiFetch(
+				`/api/workspaces/${encodeURIComponent(workspaceId)}/search/reindex`,
+				{ method: 'POST' }
+			);
+			const data = (await res.json().catch(() => null)) as {
+				summary?: { indexed?: number; totalFiles?: number };
+				message?: string;
+			} | null;
+			if (res.ok && data?.summary) {
+				reindexMessage = `Indexed ${data.summary.indexed ?? 0} of ${data.summary.totalFiles ?? 0} files.`;
+			} else {
+				let fallback = 'Reindex failed';
+				if (res.status === 403) fallback = 'Admins only.';
+				reindexMessage = data?.message ?? fallback;
+			}
+		} catch (e) {
+			reindexMessage = e instanceof Error ? e.message : 'Reindex failed';
+		} finally {
+			reindexing = false;
+		}
+	}
+
 	const workspaceMissing = $derived(!workspaceStore.activeId);
 	const queryFromUrl = $derived(page.url.searchParams.get('q')?.trim() ?? '');
 	const showEmpty = $derived(
@@ -119,6 +153,28 @@
 				Semantic search finds files by meaning across your workspace index—describe what you are
 				looking for, not just the filename.
 			</p>
+			{#if !workspaceMissing && data.isAdmin}
+				<div class="flex flex-wrap items-center gap-3">
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						class="gap-2"
+						disabled={reindexing}
+						onclick={reindexWorkspace}
+					>
+						{#if reindexing}
+							<LoaderCircleIcon class="size-4 animate-spin" aria-hidden="true" />
+						{:else}
+							<RefreshCwIcon class="size-4" aria-hidden="true" />
+						{/if}
+						Reindex workspace
+					</Button>
+					{#if reindexMessage}
+						<span class="text-xs text-muted-foreground">{reindexMessage}</span>
+					{/if}
+				</div>
+			{/if}
 		</header>
 
 		<form

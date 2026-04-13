@@ -9,6 +9,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 	if (user.role !== 'ADMIN') {
 		return {
 			isAdmin: false,
+			currentUserId: user.id,
 			drives: [],
 			users: [],
 			pendingUsers: []
@@ -37,6 +38,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 
 	return {
 		isAdmin: true,
+		currentUserId: user.id,
 		drives,
 		users: users.map((entry) => ({ ...entry, createdAt: entry.createdAt.toISOString() })),
 		pendingUsers: pendingUsers.map((entry) => ({

@@ -129,6 +129,21 @@ export const brain = {
 		});
 	},
 
+	/** Create collection only if absent. Never recreates on vector size mismatch (avoids wiping data during search). */
+	async ensureCollectionIfMissing(collection: string, vectorSize: number): Promise<void> {
+		if (await collectionExists(collection)) return;
+
+		await request(`/collections/${collection}`, {
+			method: 'PUT',
+			body: JSON.stringify({
+				vectors: {
+					size: vectorSize,
+					distance: 'Cosine'
+				}
+			})
+		});
+	},
+
 	async upsertPoints(collection: string, points: BrainPoint[]): Promise<void> {
 		if (points.length === 0) return;
 		await request(`/collections/${collection}/points?wait=true`, {
