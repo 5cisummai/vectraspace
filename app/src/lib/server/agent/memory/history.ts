@@ -44,8 +44,10 @@ export function messagesToAgentInputItems(
 					} as AgentInputItem);
 
 					items.push({
-						type: 'function_call_output',
+						type: 'function_call_result',
 						callId,
+						name: tc.tool,
+						status: 'completed' as const,
 						output: tc.resultSummary || '(no output)'
 					} as unknown as AgentInputItem);
 				}
