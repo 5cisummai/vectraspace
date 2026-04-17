@@ -1,13 +1,15 @@
 import { error } from '@sveltejs/kit';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
-import { requireAuth } from '$lib/server/api';
+import { requireAuth, requirePathAccess } from '$lib/server/api';
 import { resolveSafePath, getMediaInfo } from '$lib/server/services/storage';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ params, request, locals }) => {
-	await requireAuth(locals);
-	const resolved = resolveSafePath(params.path ?? '');
+	const user = await requireAuth(locals);
+	const relativePath = params.path ?? '';
+	await requirePathAccess(user, relativePath);
+	const resolved = resolveSafePath(relativePath);
 	if (!resolved) throw error(400, 'Invalid path');
 
 	let stat;

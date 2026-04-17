@@ -1,12 +1,16 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
-	import { createEventDispatcher } from 'svelte';
+	import { createEventDispatcher, onMount } from 'svelte';
+	import { toast } from 'svelte-sonner';
 	import * as Resizable from '$lib/components/ui/resizable/index.js';
 	import * as Breadcrumb from '$lib/components/ui/breadcrumb/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import UploadIcon from '@lucide/svelte/icons/upload';
+	import Undo2Icon from '@lucide/svelte/icons/undo-2';
+	import Redo2Icon from '@lucide/svelte/icons/redo-2';
 	import FileBrowserSidebar from './file-browser-sidebar.svelte';
 	import FileGrid from './file-grid.svelte';
+	import { fsHistory } from '$lib/hooks/fs-history.svelte';
 
 	import type { FileEntry } from './file-grid.svelte';
 
@@ -25,6 +29,10 @@
 	const dispatch = createEventDispatcher<{ select: FileEntry; pathChange: string }>();
 	let fileGrid = $state<{ triggerUpload: () => void } | null>(null);
 	let refreshing = $state(false);
+
+	onMount(() => {
+		fsHistory.refresh();
+	});
 
 	function handleSidebarSelect(event: CustomEvent<string>) {
 		const path = event.detail;
@@ -56,8 +64,51 @@
 		dispatch('pathChange', path);
 	}
 
+	async function handleUndo() {
+		const result = await fsHistory.undo();
+		if (result.success && result.description) {
+			toast.success(result.description);
+		} else if (!result.success && result.error) {
+			toast.error(result.error);
+		}
+	}
+
+	async function handleRedo() {
+		const result = await fsHistory.redo();
+		if (result.success && result.description) {
+			toast.success(result.description);
+		} else if (!result.success && result.error) {
+			toast.error(result.error);
+		}
+	}
+
+	function handleKeydown(event: KeyboardEvent) {
+		const isMac = navigator.platform.toUpperCase().includes('MAC');
+		const ctrlOrCmd = isMac ? event.metaKey : event.ctrlKey;
+		if (!ctrlOrCmd) return;
+
+		// Don't intercept when typing in inputs/textareas
+		const tag = (event.target as HTMLElement)?.tagName?.toLowerCase();
+		if (tag === 'input' || tag === 'textarea' || (event.target as HTMLElement)?.isContentEditable) {
+			return;
+		}
+
+		if (event.key === 'z' && !event.shiftKey) {
+			event.preventDefault();
+			handleUndo();
+		} else if (event.key === 'z' && event.shiftKey) {
+			event.preventDefault();
+			handleRedo();
+		} else if (event.key === 'y') {
+			event.preventDefault();
+			handleRedo();
+		}
+	}
+
 	const pathSegments = $derived(currentPath ? currentPath.split('/').filter(Boolean) : []);
 </script>
+
+<svelte:window onkeydown={handleKeydown} />
 
 <div class="flex h-full flex-col overflow-hidden">
 	<header class="flex shrink-0 items-center gap-2 border-b border-border px-4 py-3">
@@ -90,6 +141,30 @@
 				{/each}
 			</Breadcrumb.List>
 		</Breadcrumb.Root>
+		<Button
+			type="button"
+			variant="outline"
+			size="sm"
+			class="shrink-0 gap-1.5"
+			disabled={!fsHistory.canUndo || fsHistory.loading}
+			title="Undo (Ctrl+Z)"
+			onclick={handleUndo}
+		>
+			<Undo2Icon class="size-4" />
+			Undo
+		</Button>
+		<Button
+			type="button"
+			variant="outline"
+			size="sm"
+			class="shrink-0 gap-1.5"
+			disabled={!fsHistory.canRedo || fsHistory.loading}
+			title="Redo (Ctrl+Shift+Z)"
+			onclick={handleRedo}
+		>
+			<Redo2Icon class="size-4" />
+			Redo
+		</Button>
 		<Button
 			type="button"
 			variant="outline"

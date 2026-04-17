@@ -33,7 +33,7 @@
 
 <div class="h-screen w-full overflow-hidden bg-background text-foreground">
 	<Sidebar.Provider class="h-full" bind:open={sidebarOpen}>
-		<AppSidebar username={data.user?.username ?? 'User'} />
+		<AppSidebar username={data.user?.username ?? 'User'} workspacesEnabled={data.workspacesEnabled} />
 
 		<div class="flex h-full w-full flex-col">
 			<AppTopbar>

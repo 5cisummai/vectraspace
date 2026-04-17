@@ -7,6 +7,7 @@ import {
 } from '$lib/server/services/workspace';
 import type { WorkspaceSummary } from '$lib/server/services/workspace';
 import { ACTIVE_WORKSPACE_COOKIE_NAME } from '$lib/workspace-state';
+import { workspacesEnabled } from '$lib/server/features';
 
 export const load: LayoutServerLoad = async ({ cookies, locals }) => {
 	const raw = cookies.get(SIDEBAR_COOKIE_NAME);
@@ -28,5 +29,5 @@ export const load: LayoutServerLoad = async ({ cookies, locals }) => {
 		? requestedActiveWorkspaceId
 		: (workspaces[0]?.id ?? null);
 
-	return { sidebarOpen, workspaces, activeWorkspaceId };
+	return { sidebarOpen, workspaces, activeWorkspaceId, workspacesEnabled };
 };

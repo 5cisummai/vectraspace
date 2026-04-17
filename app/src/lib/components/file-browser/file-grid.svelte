@@ -18,6 +18,8 @@
 	import { toast } from 'svelte-sonner';
 	import { apiFetch } from '$lib/api-fetch';
 	import { uploadManager } from '$lib/upload-manager';
+	import { workspaceStore } from '$lib/hooks/workspace.svelte';
+	import { fsHistory } from '$lib/hooks/fs-history.svelte';
 	import FilePreviewTile from './file-preview-tile.svelte';
 
 	let {
@@ -119,7 +121,12 @@
 		newFolderError = null;
 		try {
 			const newPath = `${currentPath}/${trimmed}`;
-			const res = await apiFetch(`/api/mkdir/${encodeMediaPath(newPath)}`, { method: 'POST' });
+			const mkdirHeaders: Record<string, string> = {};
+			if (workspaceStore.activeId) mkdirHeaders['X-Workspace-Id'] = workspaceStore.activeId;
+			const res = await apiFetch(`/api/mkdir/${encodeMediaPath(newPath)}`, {
+				method: 'POST',
+				headers: mkdirHeaders
+			});
 			if (!res.ok) {
 				newFolderError = await readErrorMessage(res);
 				return;
@@ -129,6 +136,7 @@
 			toast.success('Folder created', {
 				description: trimmed
 			});
+			fsHistory.refresh();
 			notifyRefresh();
 		} finally {
 			newFolderSubmitting = false;
@@ -152,8 +160,11 @@
 		deleteSubmitting = true;
 		deleteError = null;
 		try {
+			const deleteHeaders: Record<string, string> = {};
+			if (workspaceStore.activeId) deleteHeaders['X-Workspace-Id'] = workspaceStore.activeId;
 			const res = await apiFetch(`/api/delete/${encodeMediaPath(pendingDeleteEntry.path)}`, {
-				method: 'DELETE'
+				method: 'DELETE',
+				headers: deleteHeaders
 			});
 			if (!res.ok) {
 				deleteError = await readErrorMessage(res);
@@ -166,6 +177,7 @@
 			toast.success('Deleted', {
 				description: deletedName
 			});
+			fsHistory.refresh();
 			notifyRefresh();
 		} finally {
 			deleteSubmitting = false;
@@ -190,8 +202,9 @@
 		input.value = '';
 		if (!files?.length || !currentPath?.trim()) return;
 
-		uploadManager.addFiles(currentPath, files);
+		uploadManager.addFiles(currentPath, files, workspaceStore.activeId);
 		uploadManager.uploadAll();
+		fsHistory.refresh();
 		notifyRefresh();
 	}
 

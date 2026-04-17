@@ -1,7 +1,10 @@
 import argon2 from 'argon2';
 import jwt from 'jsonwebtoken';
+import fs from 'node:fs/promises';
 import { db } from '$lib/server/db';
 import { env } from '$env/dynamic/private';
+import { getMediaRoots } from '$lib/server/services/storage';
+import * as path from '$lib/server/paths';
 import type { UserRole } from '@prisma/client';
 
 const ARGON2_OPTIONS = {
@@ -94,7 +97,7 @@ export async function createUser(opts: {
 		const count = await tx.user.count();
 		const isFirst = count === 0;
 
-		return tx.user.create({
+		const user = await tx.user.create({
 			data: {
 				username: opts.username,
 				displayName: opts.displayName,
@@ -103,6 +106,27 @@ export async function createUser(opts: {
 				approved: isFirst
 			}
 		});
+
+		// Create a personal folder on drive 0 for every new user
+		const roots = getMediaRoots();
+		if (roots.length > 0) {
+			const drive0Root = path.resolve(roots[0]);
+			const folderName = opts.username;
+			const fullPath = path.join(drive0Root, folderName);
+			const relativePath = `0/${folderName}`;
+
+			try {
+				await fs.mkdir(fullPath, { recursive: true });
+				await tx.personalFolder.create({
+					data: { userId: user.id, path: relativePath }
+				});
+			} catch (err) {
+				// Log but don't fail the signup — folder can be created later
+				console.warn('[personal-folder] Failed to create personal folder for user', user.id, err);
+			}
+		}
+
+		return user;
 	});
 }
 

@@ -2,9 +2,11 @@ import { error, json } from '@sveltejs/kit';
 import { getWorkspace, addMember } from '$lib/server/services/workspace';
 import { addMemberSchema, parseBody } from '$lib/server/api';
 import { requireWorkspaceAccess } from '$lib/server/workspace-auth';
+import { workspacesEnabled } from '$lib/server/features';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async (event) => {
+	if (!workspacesEnabled) throw error(404, 'Not found');
 	const { workspaceId, userId } = await requireWorkspaceAccess(event);
 
 	try {
@@ -17,6 +19,7 @@ export const GET: RequestHandler = async (event) => {
 };
 
 export const POST: RequestHandler = async (event) => {
+	if (!workspacesEnabled) throw error(404, 'Not found');
 	const { workspaceId } = await requireWorkspaceAccess(event, 'ADMIN');
 	const body = await parseBody(event.request, addMemberSchema);
 

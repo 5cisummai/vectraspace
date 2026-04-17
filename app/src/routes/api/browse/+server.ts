@@ -1,13 +1,14 @@
 import { json, error } from '@sveltejs/kit';
-import { requireAuth } from '$lib/server/api';
+import { requireAuth, filterPersonalEntries } from '$lib/server/api';
 import { listDirectoryTree } from '$lib/server/services/storage';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ locals }) => {
-	await requireAuth(locals);
+	const user = await requireAuth(locals);
 	try {
 		const entries = await listDirectoryTree('');
-		return json(entries);
+		const filtered = await filterPersonalEntries(user, entries);
+		return json(filtered);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : 'Unknown error';
 		throw error(500, message);

@@ -30,7 +30,8 @@
 		{
 			title: 'Workspace',
 			href: '/workspace',
-			icon: FolderCogIcon
+			icon: FolderCogIcon,
+			workspaceOnly: true
 		},
 		{
 			title: 'Settings',
@@ -57,8 +58,14 @@
 		ref = $bindable(null),
 		collapsible = 'icon',
 		username = 'User',
+		workspacesEnabled = true,
 		...restProps
-	}: ComponentProps<typeof Sidebar.Root> & { username?: string } = $props();
+	}: ComponentProps<typeof Sidebar.Root> & { username?: string; workspacesEnabled?: boolean } =
+		$props();
+
+	const visibleNavItems = $derived(
+		navMain.filter((item) => !('workspaceOnly' in item && item.workspaceOnly && !workspacesEnabled))
+	);
 </script>
 
 <Sidebar.Root bind:ref {collapsible} {...restProps}>
@@ -73,10 +80,12 @@
 				>Vectraspace</span
 			>
 		</div>
-		<WorkspaceSwitcher />
+		{#if workspacesEnabled}
+			<WorkspaceSwitcher />
+		{/if}
 	</Sidebar.Header>
 	<Sidebar.Content>
-		<NavMain items={[...navMain]} />
+		<NavMain items={visibleNavItems} />
 		<NavAgentSessions />
 	</Sidebar.Content>
 	<Sidebar.Footer>

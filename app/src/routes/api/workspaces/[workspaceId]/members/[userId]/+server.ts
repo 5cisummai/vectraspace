@@ -2,9 +2,11 @@ import { error, json } from '@sveltejs/kit';
 import { updateMemberRole, removeMember } from '$lib/server/services/workspace';
 import { parseBody, updateRoleSchema } from '$lib/server/api';
 import { requireWorkspaceAccess } from '$lib/server/workspace-auth';
+import { workspacesEnabled } from '$lib/server/features';
 import type { RequestHandler } from './$types';
 
 export const PATCH: RequestHandler = async (event) => {
+	if (!workspacesEnabled) throw error(404, 'Not found');
 	const { workspaceId } = await requireWorkspaceAccess(event, 'ADMIN');
 
 	const targetUserId = event.params.userId;
@@ -21,6 +23,7 @@ export const PATCH: RequestHandler = async (event) => {
 };
 
 export const DELETE: RequestHandler = async (event) => {
+	if (!workspacesEnabled) throw error(404, 'Not found');
 	const { workspaceId } = await requireWorkspaceAccess(event, 'ADMIN');
 
 	const targetUserId = event.params.userId;

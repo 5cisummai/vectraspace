@@ -1,10 +1,13 @@
 import { error, json } from '@sveltejs/kit';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import * as path from '$lib/server/paths';
 import { resolveSafePath } from '$lib/server/services/storage';
 import { deleteSemanticEntryByRelativePath } from '$lib/server/semantic';
 import { db } from '$lib/server/db';
-import { requireAuth, audit } from '$lib/server/api';
+import { requireAuth, requirePathAccess, audit } from '$lib/server/api';
+import { moveToTrash } from '$lib/server/trash';
+import { recordAction, FsOperation } from '$lib/server/fs-history';
 import type { RequestHandler } from './$types';
 
 async function collectNestedFilePaths(fullPath: string, relativePath: string): Promise<string[]> {
@@ -24,16 +27,23 @@ async function collectNestedFilePaths(fullPath: string, relativePath: string): P
 	return nestedPaths.flat();
 }
 
-export const DELETE: RequestHandler = async ({ params, locals }) => {
+export const DELETE: RequestHandler = async ({ params, locals, request }) => {
 	// Re-validate user from DB (not just JWT claims)
 	const user = await requireAuth(locals);
 
 	const relativePath = params.path ?? '';
+	await requirePathAccess(user, relativePath);
 	const resolved = resolveSafePath(relativePath);
 	if (!resolved) throw error(400, 'Invalid path');
 
 	if (path.resolve(resolved.fullPath) === path.resolve(resolved.root)) {
 		throw error(403, 'Deleting a media root is not allowed');
+	}
+
+	// Prevent deleting a personal folder root (even your own)
+	const personalFolder = await db.personalFolder.findUnique({ where: { path: relativePath } });
+	if (personalFolder) {
+		throw error(403, 'Personal folders cannot be deleted');
 	}
 
 	let stat;
@@ -70,12 +80,12 @@ export const DELETE: RequestHandler = async ({ params, locals }) => {
 
 	const semanticPaths = await collectNestedFilePaths(resolved.fullPath, relativePath);
 
+	// Workspace context from header (set by frontend when workspace is active)
+	const workspaceId = request.headers.get('X-Workspace-Id') ?? undefined;
+	const trashKey = randomUUID();
+
 	try {
-		if (stat.isDirectory()) {
-			await fs.rm(resolved.fullPath, { recursive: true });
-		} else {
-			await fs.unlink(resolved.fullPath);
-		}
+		await moveToTrash(resolved.fullPath, trashKey);
 	} catch (err) {
 		if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
 			throw error(404, 'Path not found');
@@ -101,6 +111,15 @@ export const DELETE: RequestHandler = async ({ params, locals }) => {
 			console.warn('Failed to delete semantic index entry:', semanticPaths[index], result.reason);
 		}
 	}
+
+	// Record history action
+	await recordAction({
+		userId: user.id,
+		workspaceId: workspaceId ?? null,
+		operation: FsOperation.DELETE,
+		payload: { relativePath, trashKey, root: resolved.root },
+		description: `Deleted ${relativePath}`
+	});
 
 	// Audit log for all file/directory deletions
 	await audit({

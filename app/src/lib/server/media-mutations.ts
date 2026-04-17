@@ -1,12 +1,20 @@
 import fs from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import * as path from '$lib/server/paths';
 import { db } from '$lib/server/db';
 import { deleteSemanticEntryByRelativePath } from '$lib/server/semantic';
 import { resolveSafePath } from '$lib/server/services/storage';
+import { moveToTrash } from '$lib/server/trash';
+import { recordAction, FsOperation } from '$lib/server/fs-history';
 
 export interface MutationUserContext {
 	userId: string;
 	isAdmin: boolean;
+}
+
+export interface HistoryContext {
+	userId: string;
+	workspaceId?: string | null;
 }
 
 async function collectNestedRelativePaths(
@@ -62,7 +70,8 @@ async function canDeletePath(
 
 export async function deleteMediaPath(
 	relativePath: string,
-	ctx: MutationUserContext
+	ctx: MutationUserContext,
+	historyCtx?: HistoryContext
 ): Promise<string> {
 	const resolved = resolveSafePath(relativePath);
 	if (!resolved) return `Error: invalid or out-of-scope path "${relativePath}".`;
@@ -82,8 +91,18 @@ export async function deleteMediaPath(
 
 	const semanticPaths = await collectNestedRelativePaths(resolved.fullPath, relativePath);
 
+	// Record action before mutation so we have the action ID for the trash key
+	let trashKey: string | undefined;
+	if (historyCtx) {
+		// Pre-generate a stable trash key so we can create the action and move to trash atomically
+		trashKey = randomUUID();
+	}
+
 	try {
-		if (stat.isDirectory()) {
+		if (historyCtx && trashKey) {
+			// Move to trash instead of permanent delete
+			await moveToTrash(resolved.fullPath, trashKey);
+		} else if (stat.isDirectory()) {
 			await fs.rm(resolved.fullPath, { recursive: true });
 		} else {
 			await fs.unlink(resolved.fullPath);
@@ -105,6 +124,16 @@ export async function deleteMediaPath(
 		semanticPaths.map((p) => deleteSemanticEntryByRelativePath(p).catch(() => undefined))
 	);
 
+	if (historyCtx && trashKey) {
+		await recordAction({
+			userId: historyCtx.userId,
+			workspaceId: historyCtx.workspaceId,
+			operation: FsOperation.DELETE,
+			payload: { relativePath, trashKey, root: resolved.root },
+			description: `Deleted ${relativePath}`
+		});
+	}
+
 	return `Deleted successfully: ${relativePath}`;
 }
 
@@ -117,7 +146,8 @@ function parseRootIndex(rel: string): number | null {
 export async function moveMediaPath(
 	source: string,
 	destination: string,
-	ctx: MutationUserContext
+	ctx: MutationUserContext,
+	historyCtx?: HistoryContext
 ): Promise<string> {
 	const srcRes = resolveSafePath(source);
 	const dstRes = resolveSafePath(destination);
@@ -192,13 +222,24 @@ export async function moveMediaPath(
 		}
 	}
 
+	if (historyCtx) {
+		await recordAction({
+			userId: historyCtx.userId,
+			workspaceId: historyCtx.workspaceId,
+			operation: FsOperation.MOVE,
+			payload: { from: source, to: destination },
+			description: `Moved ${source} → ${destination}`
+		});
+	}
+
 	return `Moved successfully from "${source}" to "${destination}". Semantic search may be stale until you re-ingest the new path.`;
 }
 
 export async function moveManyMediaPaths(
 	sources: string[],
 	destinationDirectory: string,
-	ctx: MutationUserContext
+	ctx: MutationUserContext,
+	historyCtx?: HistoryContext
 ): Promise<string> {
 	const normalizedSources = Array.from(
 		new Set(sources.map((s) => s.trim()).filter((s) => s.length > 0))
@@ -244,7 +285,7 @@ export async function moveManyMediaPaths(
 	for (const source of normalizedSources) {
 		const leafName = path.basename(source);
 		const destinationPath = baseDir.length > 0 ? `${baseDir}/${leafName}` : leafName;
-		const result = await moveMediaPath(source, destinationPath, ctx);
+		const result = await moveMediaPath(source, destinationPath, ctx, historyCtx);
 		itemResults.push(`- ${source} -> ${destinationPath}: ${result}`);
 		if (result.startsWith('Error:')) {
 			failureCount += 1;
@@ -263,7 +304,8 @@ export async function moveManyMediaPaths(
 export async function copyMediaPath(
 	source: string,
 	destination: string,
-	ctx: MutationUserContext
+	ctx: MutationUserContext,
+	historyCtx?: HistoryContext
 ): Promise<string> {
 	const srcRes = resolveSafePath(source);
 	const dstRes = resolveSafePath(destination);
@@ -324,10 +366,23 @@ export async function copyMediaPath(
 		await fs.copyFile(srcRes.fullPath, dstRes.fullPath);
 	}
 
+	if (historyCtx) {
+		await recordAction({
+			userId: historyCtx.userId,
+			workspaceId: historyCtx.workspaceId,
+			operation: FsOperation.COPY,
+			payload: { destination },
+			description: `Copied ${source} → ${destination}`
+		});
+	}
+
 	return `Copied successfully from "${source}" to "${destination}". Run ingestion on the new path if you need it in search.`;
 }
 
-export async function mkdirMediaPath(relativePath: string): Promise<string> {
+export async function mkdirMediaPath(
+	relativePath: string,
+	historyCtx?: HistoryContext
+): Promise<string> {
 	if (!relativePath.trim()) return 'Error: path is required.';
 
 	const resolved = resolveSafePath(relativePath);
@@ -342,6 +397,16 @@ export async function mkdirMediaPath(relativePath: string): Promise<string> {
 			if (code === 'ENOENT') return 'Error: parent directory does not exist.';
 		}
 		return 'Error: failed to create folder.';
+	}
+
+	if (historyCtx) {
+		await recordAction({
+			userId: historyCtx.userId,
+			workspaceId: historyCtx.workspaceId,
+			operation: FsOperation.MKDIR,
+			payload: { path: relativePath },
+			description: `Created directory ${relativePath}`
+		});
 	}
 
 	return `Created directory "${relativePath}".`;

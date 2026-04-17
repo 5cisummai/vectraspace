@@ -2,18 +2,32 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { untrack } from 'svelte';
-	import ArrowUpIcon from '@lucide/svelte/icons/arrow-up';
 	import BotIcon from '@lucide/svelte/icons/bot';
 	import FilesIcon from '@lucide/svelte/icons/files';
+	import FolderIcon from '@lucide/svelte/icons/folder';
+	import FolderOpenIcon from '@lucide/svelte/icons/folder-open';
+	import HardDriveIcon from '@lucide/svelte/icons/hard-drive';
+	import PinIcon from '@lucide/svelte/icons/pin';
+	import PlusIcon from '@lucide/svelte/icons/plus';
+	import XIcon from '@lucide/svelte/icons/x';
+	import ZapIcon from '@lucide/svelte/icons/zap';
+	import SparklesIcon from '@lucide/svelte/icons/sparkles';
+	import SearchIcon from '@lucide/svelte/icons/search';
+	import ScanTextIcon from '@lucide/svelte/icons/scan-text';
+	import CheckCircle2Icon from '@lucide/svelte/icons/check-circle-2';
+	import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
+	import CircleDotIcon from '@lucide/svelte/icons/circle-dot';
 	import { Button } from '$lib/components/ui/button';
-	import { Textarea } from '$lib/components/ui/textarea';
 	import * as Card from '$lib/components/ui/card/index.js';
+	import Badge from '$lib/components/ui/badge/badge.svelte';
+	import Progress from '$lib/components/ui/progress/progress.svelte';
 	import { agentSessions } from '$lib/hooks/agent-sessions.svelte';
 	import { workspaceStore } from '$lib/hooks/workspace.svelte';
+	import { pinnedFolders } from '$lib/hooks/pinned-folders.svelte';
 	import { dedupeChatsById } from '$lib/utils.js';
 	import type { FileEntry } from '$lib/components/file-browser/file-grid.svelte';
 	import FilePreviewTile from '$lib/components/file-browser/file-preview-tile.svelte';
-	import AgentStatusItem from '$lib/components/agent-status-item.svelte';
+	import ChatComposer from '$lib/components/chat-llm/chat-composer.svelte';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -27,37 +41,47 @@
 		return 'Good evening';
 	}
 
+	// ── Composer ─────────────────────────────────────────────────────────────
 	let composerValue = $state('');
-	let textareaEl = $state<HTMLElement | null>(null);
+	let composerSubmitting = $state(false);
+	let composerError = $state<string | null>(null);
 
-	function resizeComposer() {
-		const el = textareaEl;
-		if (!el) return;
-		el.style.height = '0px';
-		const next = Math.min(Math.max(el.scrollHeight, 52), 220);
-		el.style.height = `${next}px`;
-	}
-
-	$effect(() => {
-		void composerValue;
-		resizeComposer();
-	});
-
-	function submitComposer() {
+	async function submitComposer() {
 		const q = composerValue.trim();
-		if (!q) return;
-		// eslint-disable-next-line svelte/no-navigation-without-resolve
-		goto(`/chat?q=${encodeURIComponent(q)}`);
+		if (!q || composerSubmitting) return;
+		const ws = workspaceStore.activeId;
+		if (!ws) return;
+		composerSubmitting = true;
+		composerError = null;
+		try {
+			const res = await fetch(`/api/workspaces/${encodeURIComponent(ws)}/brain/ask`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ question: q, background: true, filters: { limit: 16 } })
+			});
+			if (!res.ok) {
+				const err = await res.json().catch(() => ({}));
+				throw new Error((err as { message?: string }).message ?? `Request failed (${res.status})`);
+			}
+			const { chatId } = (await res.json()) as { chatId: string };
+			// eslint-disable-next-line svelte/no-navigation-without-resolve
+			goto(`/chat?agent=${encodeURIComponent(chatId)}`);
+		} catch (err) {
+			composerError = err instanceof Error ? err.message : 'Failed to start chat';
+			composerSubmitting = false;
+		}
 	}
 
-	const suggestions = [
-		'What files are in my library?',
-		'Find all video files',
-		'Organize my music by artist',
-		'Show me recently added files'
+	type QuickAction = { label: string; icon: typeof SparklesIcon };
+
+	const quickActions: QuickAction[] = [
+		{ label: 'Summarize recent docs', icon: SparklesIcon },
+		{ label: 'Find unorganized photos', icon: SearchIcon },
+		{ label: 'Scan for invoices', icon: ScanTextIcon },
+		{ label: 'Show recent activity', icon: ZapIcon }
 	];
 
-	// ── Recent agent sessions ─────────────────────────────────────────────────
+	// ── Agent sessions ───────────────────────────────────────────────────────
 	type AgentSummary = PageData['agents'][number];
 
 	let agents = $state<AgentSummary[]>([]);
@@ -87,7 +111,7 @@
 		goto(`/chat`);
 	}
 
-	// ── Media library ─────────────────────────────────────────────────────────
+	// ── File tree ─────────────────────────────────────────────────────────────
 	type BrowseNode = {
 		name?: string;
 		title?: string;
@@ -118,43 +142,29 @@
 		return entries.flatMap((e) => [e, ...(e.children ? flattenEntries(e.children) : [])]);
 	}
 
-	const allEntries = $derived(flattenEntries(toFileEntries(fileTree)));
+	const topLevelEntries = $derived(toFileEntries(fileTree));
+	const allEntries = $derived(flattenEntries(topLevelEntries));
+	const topLevelDirs = $derived(topLevelEntries.filter((e) => e.type === 'directory'));
 
 	const IMAGE_RE = /\.(png|jpe?g|webp|gif|bmp|tiff?|svg)$/i;
 	const DOC_RE = /\.(pdf|md|txt|docx?|xlsx?|pptx?|epub|cbz|cbr)$/i;
-	const AUDIO_RE = /\.(mp3|wav|m4a|aac|flac|ogg|wma)$/i;
 	const VIDEO_RE = /\.(mp4|webm|mov|m4v|avi|mkv|ogv)$/i;
 
-	type MediaSection = { title: string; empty: string; aria: string; files: FileEntry[] };
+	const visualFiles = $derived(
+		allEntries
+			.filter(
+				(e) => e.type === 'file' && (IMAGE_RE.test(e.path ?? e.name) || VIDEO_RE.test(e.path ?? e.name))
+			)
+			.slice(0, 16)
+	);
 
-	const mediaSections = $derived<MediaSection[]>([
-		{
-			title: 'Documents',
-			empty: 'No documents found.',
-			aria: 'Documents',
-			files: allEntries.filter((e) => e.type === 'file' && DOC_RE.test(e.path ?? e.name))
-		},
-		{
-			title: 'Images',
-			empty: 'No images found.',
-			aria: 'Images',
-			files: allEntries.filter((e) => e.type === 'file' && IMAGE_RE.test(e.path ?? e.name))
-		},
-		{
-			title: 'Videos',
-			empty: 'No videos found.',
-			aria: 'Videos',
-			files: allEntries.filter((e) => e.type === 'file' && VIDEO_RE.test(e.path ?? e.name))
-		},
-		{
-			title: 'Audio',
-			empty: 'No audio files found.',
-			aria: 'Audio files',
-			files: allEntries.filter((e) => e.type === 'file' && AUDIO_RE.test(e.path ?? e.name))
-		}
-	]);
+	const docFiles = $derived(
+		allEntries
+			.filter((e) => e.type === 'file' && DOC_RE.test(e.path ?? e.name))
+			.slice(0, 8)
+	);
 
-	const hasAnyMedia = $derived(mediaSections.some((s) => s.files.length > 0));
+	const hasAnyContent = $derived(visualFiles.length > 0 || docFiles.length > 0);
 
 	function streamUrl(path: string) {
 		return `/api/stream/${path}`;
@@ -164,169 +174,431 @@
 		// eslint-disable-next-line svelte/no-navigation-without-resolve
 		goto(`/browse/media?file=${encodeURIComponent(path)}`);
 	}
+
+	// ── Pinned folders ────────────────────────────────────────────────────────
+	let showFolderPicker = $state(false);
+
+	function pinFolder(entry: FileEntry) {
+		pinnedFolders.pin(entry.path, entry.name);
+		showFolderPicker = false;
+	}
+
+	function openPinned(path: string) {
+		// eslint-disable-next-line svelte/no-navigation-without-resolve
+		goto(`/browse?path=${encodeURIComponent(path)}`);
+	}
+
+	// ── Storage ───────────────────────────────────────────────────────────────
+	type DriveInfo = PageData['drives'][number];
+
+	const drives = $derived((data.drives ?? []) as DriveInfo[]);
+
+	function formatBytes(bytes: number): string {
+		if (bytes < 1_000_000_000) return `${Math.round(bytes / 1_000_000)} MB`;
+		return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
+	}
 </script>
 
 <div class="min-h-full min-w-0 bg-background text-foreground">
-	<main class="mx-auto flex w-full min-w-0 flex-col gap-10 px-4 py-10 sm:px-6 lg:px-8">
-		<div class="mx-auto flex w-full max-w-3xl min-w-0 flex-col gap-10">
-			<section class="flex w-full min-w-0 flex-col items-center gap-6 text-center">
-				<div class="flex flex-col gap-1">
-					<p class="text-sm text-muted-foreground">
-						{greeting()}{username ? `, ${username}` : ''}
-					</p>
-					<h1 class="text-3xl font-semibold tracking-tight sm:text-4xl">What can I help with?</h1>
-				</div>
+	<main class="mx-auto flex w-full max-w-6xl min-w-0 flex-col gap-10 px-4 py-8 sm:px-6 lg:px-8">
 
-				<!-- Composer -->
-				<form
-					onsubmit={(e) => {
-						e.preventDefault();
-						submitComposer();
-					}}
-					class="w-full"
+		<!-- ① Command Header ─────────────────────────────────────────────────── -->
+		<section class="flex w-full flex-col items-center gap-4">
+			<div class="flex flex-col items-center gap-0.5 text-center">
+				<p class="text-xs text-muted-foreground">
+					{greeting()}{username ? `, ${username}` : ''}
+				</p>
+				<h1 class="text-2xl font-semibold tracking-tight">Command Center</h1>
+			</div>
+
+			<div class="w-full max-w-2xl">
+				<ChatComposer
+					bind:value={composerValue}
+					disabled={composerSubmitting}
+					placeholder="Ask anything about your media library…"
+					onSubmit={() => void submitComposer()}
+				/>
+				{#if composerError}
+					<p class="mt-2 text-xs text-destructive">{composerError}</p>
+				{/if}
+			</div>
+
+			<!-- Quick Action chips -->
+			<div class="flex flex-wrap justify-center gap-2">
+				{#each quickActions as action (action.label)}
+					{@const Icon = action.icon}
+					<button
+						type="button"
+						disabled={composerSubmitting}
+						onclick={() => {
+							composerValue = action.label;
+							void submitComposer();
+						}}
+						class="flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:bg-primary/5 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+					>
+						<Icon class="size-3 text-primary/60" />
+						{action.label}
+					</button>
+				{/each}
+			</div>
+		</section>
+
+		<!-- ② Active Intelligence Row ────────────────────────────────────────── -->
+		<section class="flex w-full min-w-0 flex-col gap-3">
+			<div class="flex min-w-0 items-center justify-between gap-2">
+				<h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+					What's Happening
+				</h2>
+				<Button variant="ghost" size="sm" class="gap-1.5 text-xs" onclick={openNewAgent}>
+					<PlusIcon class="size-3.5" />
+					New agent
+				</Button>
+			</div>
+
+			{#if agents.length === 0}
+				<div
+					class="flex items-center gap-4 rounded-xl border border-dashed px-4 py-3.5"
 				>
 					<div
-						class="flex items-end gap-2 rounded-2xl border border-border bg-muted/20 px-3 py-2 shadow-sm transition-shadow focus-within:shadow-md focus-within:ring-1 focus-within:ring-ring/40"
+						class="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted"
 					>
-						<Textarea
-							bind:ref={textareaEl}
-							bind:value={composerValue}
-							oninput={resizeComposer}
-							onkeydown={(e) => {
-								if (e.key === 'Enter' && !e.shiftKey) {
-									e.preventDefault();
-									submitComposer();
-								}
-							}}
-							placeholder="Ask anything about your media library…"
-							rows={1}
-							class="max-h-48 flex-1 resize-none border-0 bg-transparent! shadow-none focus-visible:ring-0"
-						/>
-						<Button
-							type="submit"
-							size="icon"
-							disabled={!composerValue.trim()}
-							class="mb-0.5 size-8 shrink-0 rounded-xl bg-foreground text-background hover:bg-foreground/90 disabled:opacity-40"
-							aria-label="Send"
-						>
-							<ArrowUpIcon class="size-4" />
-						</Button>
+						<BotIcon class="size-4 text-muted-foreground" />
 					</div>
-				</form>
-
-				<!-- Suggestion chips -->
-				<div class="flex flex-wrap justify-center gap-2">
-					{#each suggestions as s (s)}
-						<button
-							type="button"
-							onclick={() => {
-								composerValue = s;
-								submitComposer();
-							}}
-							class="rounded-full border border-border bg-background px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
-						>
-							{s}
-						</button>
-					{/each}
+					<div>
+						<p class="text-sm font-medium">No active agents</p>
+						<p class="text-xs text-muted-foreground">
+							Use the search bar above to launch your first agent session.
+						</p>
+					</div>
 				</div>
-			</section>
+			{:else}
+				<div
+					class="-mx-1 flex snap-x snap-mandatory gap-3 overflow-x-auto px-1 pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+				>
+					{#each agents.slice(0, 8) as agent (agent.id)}
+						{@const isActive =
+							agentSessions.getStatus(agent.id) === 'working' ||
+							agent.status === 'working'}
+						{@const isDone = !isActive && agent.status === 'done'}
+						<a
+							href="/chat?agent={encodeURIComponent(agent.id)}"
+							class="flex w-52 shrink-0 snap-start flex-col gap-2.5 rounded-xl border bg-card p-3.5 transition-all hover:border-primary/30 hover:shadow-sm"
+						>
+							<div class="flex items-start justify-between gap-2">
+								<p
+									class="line-clamp-2 text-xs font-medium leading-tight text-foreground"
+								>
+									{agent.title || 'Agent session'}
+								</p>
+								{#if isActive}
+									<LoaderCircleIcon
+										class="size-3.5 shrink-0 animate-spin text-amber-500"
+									/>
+								{:else if isDone}
+									<CheckCircle2Icon
+										class="size-3.5 shrink-0 text-green-500"
+									/>
+								{:else}
+									<CircleDotIcon
+										class="size-3.5 shrink-0 text-muted-foreground/40"
+									/>
+								{/if}
+							</div>
+							<div class="flex items-center gap-1.5">
+								{#if isActive}
+									<Badge
+										class="gap-1 border-amber-200 bg-amber-50 text-amber-600 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-400"
+									>
+										<span
+											class="size-1.5 animate-pulse rounded-full bg-amber-500"
+										></span>
+										Running
+									</Badge>
+								{:else if isDone}
+									<Badge
+										class="border-green-200 bg-green-50 text-green-600 dark:border-green-900 dark:bg-green-950/30 dark:text-green-400"
+									>
+										Completed
+									</Badge>
+								{:else}
+									<Badge variant="outline" class="text-muted-foreground">Idle</Badge>
+								{/if}
+							</div>
+							<p class="text-xs text-muted-foreground">
+								{agent.messageCount} msg{agent.messageCount === 1 ? '' : 's'} · {relativeTimestamp(
+									agent.updatedAt
+								)}
+							</p>
+						</a>
+					{/each}
 
-			<!-- ── Recent agent sessions ────────────────────────────────────────── -->
-			<section class="flex w-full min-w-0 flex-col gap-4">
+					<!-- New Session Card -->
+					<button
+						type="button"
+						onclick={openNewAgent}
+						class="flex w-44 shrink-0 snap-start flex-col items-center justify-center gap-2 rounded-xl border border-dashed p-4 text-muted-foreground transition-colors hover:border-primary/40 hover:bg-primary/5 hover:text-foreground"
+					>
+						<PlusIcon class="size-5" />
+						<span class="text-xs font-medium">New Session</span>
+					</button>
+				</div>
+
+				{#if agents.length > 8}
+					<Button variant="ghost" size="sm" class="self-start text-xs" onclick={openNewAgent}>
+						View all {agents.length} sessions →
+					</Button>
+				{/if}
+			{/if}
+		</section>
+
+		<!-- ③ Main Body: Continue Working + Pinned ───────────────────────────── -->
+		<div class="grid w-full gap-6 lg:grid-cols-3">
+
+			<!-- Continue Working (recent files) ── 2/3 width -->
+			<section class="flex min-w-0 flex-col gap-4 lg:col-span-2">
 				<div class="flex min-w-0 items-center justify-between gap-2">
-					<h2 class="text-sm font-semibold">Recent sessions</h2>
-					<Button variant="ghost" size="sm" class="gap-1.5 text-xs" onclick={openNewAgent}>
-						<BotIcon class="size-3.5" />
-						New agent
+					<h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+						Continue Working
+					</h2>
+					<Button
+						variant="ghost"
+						size="sm"
+						class="gap-1.5 text-xs"
+						onclick={() => goto(resolve('/browse'))}
+					>
+						<FilesIcon class="size-3.5" />
+						Browse all
 					</Button>
 				</div>
 
-				{#if agents.length === 0}
+				{#if !hasAnyContent}
 					<Card.Root class="border-dashed">
-						<Card.Content class="flex flex-col items-center gap-3 py-10 text-center">
-							<div class="flex size-10 items-center justify-center rounded-full bg-muted">
-								<BotIcon class="size-5 text-muted-foreground" />
+						<Card.Content class="flex flex-col items-center gap-3 py-8 text-center">
+							<div class="flex size-9 items-center justify-center rounded-full bg-muted">
+								<FilesIcon class="size-4 text-muted-foreground" />
 							</div>
 							<div class="flex flex-col gap-1">
-								<p class="text-sm font-medium">No agent sessions yet</p>
+								<p class="text-sm font-medium">No files indexed yet</p>
 								<p class="text-xs text-muted-foreground">
-									Ask a question above to start your first session.
+									Files will appear here once indexed by an agent.
 								</p>
 							</div>
 						</Card.Content>
 					</Card.Root>
 				{:else}
-					<div class="flex flex-col divide-y divide-border rounded-xl border">
-						{#each agents.slice(0, 6) as agent (agent.id)}
-							<AgentStatusItem
-								chatId={agent.id}
-								workspaceId={workspaceStore.activeId}
-								name={agent.title || 'Agent session'}
-								description="{agent.messageCount} message{agent.messageCount === 1
-									? ''
-									: 's'} · {relativeTimestamp(agent.updatedAt)}"
-								sessionStatus={agent.status}
-								href="/chat?agent={encodeURIComponent(agent.id)}"
-								size="sm"
-							/>
-						{/each}
+					<div class="flex flex-col gap-5">
+						<!-- Visual files: images + videos — grid of square tiles -->
+						{#if visualFiles.length > 0}
+							<div class="flex flex-col gap-2">
+								<h3 class="text-xs font-medium text-muted-foreground">Media</h3>
+								<div
+									class="grid grid-cols-4 gap-2 sm:grid-cols-5 lg:grid-cols-4 xl:grid-cols-5"
+								>
+									{#each visualFiles as entry (entry.path)}
+										<button
+											type="button"
+											class="aspect-square overflow-hidden rounded-lg outline-none ring-offset-background transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring"
+											onclick={() => openInBrowser(entry.path)}
+										>
+											<FilePreviewTile
+												class="pointer-events-none size-full"
+												item={{
+													name: entry.name,
+													path: entry.path,
+													url: streamUrl(entry.path),
+													type: 'file'
+												}}
+											/>
+										</button>
+									{/each}
+								</div>
+							</div>
+						{/if}
+
+						<!-- Document files — compact list rows -->
+						{#if docFiles.length > 0}
+							<div class="flex flex-col gap-2">
+								<h3 class="text-xs font-medium text-muted-foreground">Documents</h3>
+								<div
+									class="flex flex-col divide-y divide-border overflow-hidden rounded-xl border"
+								>
+									{#each docFiles as entry (entry.path)}
+										<button
+											type="button"
+											class="group flex items-center gap-3 px-3 py-2.5 text-left transition hover:bg-muted/50"
+											onclick={() => openInBrowser(entry.path)}
+										>
+											<div
+												class="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/10"
+											>
+												<FilesIcon class="size-3.5 text-primary" />
+											</div>
+											<div class="min-w-0 flex-1">
+												<p class="truncate text-xs font-medium text-foreground">
+													{entry.name}
+												</p>
+												<p class="truncate text-xs text-muted-foreground">
+													{entry.path}
+												</p>
+											</div>
+										</button>
+									{/each}
+								</div>
+							</div>
+						{/if}
 					</div>
-					{#if agents.length > 6}
-						<Button variant="ghost" size="sm" class="self-start text-xs" onclick={openNewAgent}>
-							View all {agents.length} sessions →
+				{/if}
+			</section>
+
+			<!-- Pinned Folders ── 1/3 width -->
+			<section class="flex min-w-0 flex-col gap-3">
+				<div class="flex min-w-0 items-center justify-between gap-2">
+					<h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+						Pinned
+					</h2>
+					{#if topLevelDirs.length > 0}
+						<Button
+							variant="ghost"
+							size="sm"
+							class="gap-1.5 text-xs"
+							onclick={() => (showFolderPicker = !showFolderPicker)}
+						>
+							<PinIcon class="size-3.5" />
+							Pin folder
 						</Button>
 					{/if}
+				</div>
+
+				<!-- Folder picker -->
+				{#if showFolderPicker}
+					<Card.Root class="border-primary/20">
+						<Card.Content class="p-1.5">
+							<p class="px-2 pb-1 pt-0.5 text-xs text-muted-foreground">
+								Select a folder to pin:
+							</p>
+							<div class="flex flex-col">
+								{#each topLevelDirs.filter((d) => !pinnedFolders.isPinned(d.path)) as dir (dir.path)}
+									<button
+										type="button"
+										class="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-muted/70"
+										onclick={() => pinFolder(dir)}
+									>
+										<FolderIcon class="size-3.5 shrink-0 text-amber-500" />
+										<span class="truncate font-medium">{dir.name}</span>
+									</button>
+								{/each}
+								{#if topLevelDirs.every((d) => pinnedFolders.isPinned(d.path))}
+									<p class="px-2 py-1.5 text-xs italic text-muted-foreground">
+										All folders are already pinned.
+									</p>
+								{/if}
+							</div>
+						</Card.Content>
+					</Card.Root>
+				{/if}
+
+				{#if pinnedFolders.items.length === 0}
+					<div
+						class="flex flex-col items-center gap-2 rounded-xl border border-dashed p-5 text-center"
+					>
+						<PinIcon class="size-5 text-muted-foreground/40" />
+						<p class="text-xs text-muted-foreground">
+							Pin folders for quick access.<br />Click "Pin folder" above to start.
+						</p>
+					</div>
+				{:else}
+					<div
+						class="flex flex-col divide-y divide-border overflow-hidden rounded-xl border"
+					>
+						{#each pinnedFolders.items as folder (folder.path)}
+							<div class="group flex items-center gap-2.5 px-3 py-2.5">
+								<button
+									type="button"
+									class="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+									onclick={() => openPinned(folder.path)}
+								>
+									<div
+										class="flex size-7 shrink-0 items-center justify-center rounded-md bg-amber-500/10"
+									>
+										<FolderOpenIcon
+											class="size-3.5 text-amber-600 dark:text-amber-400"
+										/>
+									</div>
+									<div class="min-w-0 flex-1">
+										<p class="truncate text-xs font-medium text-foreground">
+											{folder.name}
+										</p>
+										<p class="truncate text-xs text-muted-foreground">
+											{folder.path}
+										</p>
+									</div>
+								</button>
+								<button
+									type="button"
+									title="Unpin"
+									class="flex size-6 items-center justify-center rounded text-transparent transition-colors group-hover:text-muted-foreground/60 hover:!text-foreground"
+									onclick={() => pinnedFolders.unpin(folder.path)}
+								>
+									<XIcon class="size-3.5" />
+								</button>
+							</div>
+						{/each}
+					</div>
 				{/if}
 			</section>
 		</div>
 
-		<!-- ── Media library ────────────────────────────────────────────────── -->
-		<section class="mx-auto flex w-full max-w-6xl min-w-0 flex-col gap-6">
-			<div class="flex min-w-0 items-center justify-between gap-2">
-				<h2 class="text-sm font-semibold tracking-wide text-muted-foreground uppercase">Library</h2>
-				<Button
-					variant="ghost"
-					size="sm"
-					class="gap-1.5 text-xs"
-					onclick={() => goto(resolve('/browse'))}
-				>
-					<FilesIcon class="size-3.5" />
-					Browse all
-				</Button>
-			</div>
-
-			{#if !hasAnyMedia}
-				<p class="text-sm text-muted-foreground">No media files indexed yet.</p>
-			{:else}
-				{#each mediaSections.filter((s) => s.files.length > 0) as s (s.title)}
-					<div class="flex min-w-0 flex-col gap-3">
-						<h3 class="text-sm font-medium">{s.title}</h3>
-						<div
-							class="-mx-1 flex w-full min-w-0 snap-x snap-mandatory gap-3 overflow-x-auto overflow-y-visible mask-[linear-gradient(to_right,black_calc(100%-2.5rem),transparent)] px-1 pb-1 [-ms-overflow-style:none] [scrollbar-width:none] sm:mask-none [&::-webkit-scrollbar]:hidden"
-							role="region"
-							aria-label={s.aria}
-						>
-							{#each s.files as entry (entry.path)}
-								<button
-									type="button"
-									class="w-36 shrink-0 snap-start rounded-lg text-left ring-offset-background transition outline-none hover:opacity-95 focus-visible:ring-2 focus-visible:ring-ring"
-									onclick={() => openInBrowser(entry.path)}
-								>
-									<FilePreviewTile
-										class="pointer-events-none"
-										item={{
-											name: entry.name,
-											path: entry.path,
-											url: streamUrl(entry.path),
-											type: 'file'
-										}}
+		<!-- ④ Storage Health ─────────────────────────────────────────────────── -->
+		{#if drives.length > 0}
+			<section class="flex w-full min-w-0 flex-col gap-3">
+				<div class="flex items-center gap-2">
+					<HardDriveIcon class="size-3.5 text-muted-foreground" />
+					<h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+						Storage
+					</h2>
+				</div>
+				<div class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+					{#each drives as drive (drive.index)}
+						<Card.Root class="overflow-hidden">
+							<Card.Content class="p-4">
+								<div class="mb-3 flex items-center justify-between gap-2">
+									<div class="flex min-w-0 items-center gap-2">
+										<HardDriveIcon class="size-4 shrink-0 text-muted-foreground" />
+										<p class="truncate text-sm font-medium">{drive.name}</p>
+									</div>
+									{#if drive.available}
+										<span class="shrink-0 text-xs text-muted-foreground">
+											{drive.usedPercent ?? 0}%
+										</span>
+									{:else}
+										<Badge variant="destructive">Unavailable</Badge>
+									{/if}
+								</div>
+								{#if drive.available && drive.usedBytes != null && drive.totalBytes != null}
+									<Progress
+										value={drive.usedPercent ?? 0}
+										max={100}
+										class={(drive.usedPercent ?? 0) > 90
+											? '[&_[data-slot=progress-indicator]]:bg-destructive'
+											: (drive.usedPercent ?? 0) > 75
+												? '[&_[data-slot=progress-indicator]]:bg-amber-500'
+												: ''}
 									/>
-								</button>
-							{/each}
-						</div>
-					</div>
-				{/each}
-			{/if}
-		</section>
+									<div
+										class="mt-2 flex items-center justify-between text-xs text-muted-foreground"
+									>
+										<span>{formatBytes(drive.usedBytes)} used</span>
+										<span>{formatBytes(drive.freeBytes!)} free</span>
+									</div>
+								{:else if !drive.available}
+									<p class="text-xs text-muted-foreground">Drive is not accessible.</p>
+								{/if}
+							</Card.Content>
+						</Card.Root>
+					{/each}
+				</div>
+			</section>
+		{/if}
+
 	</main>
 </div>

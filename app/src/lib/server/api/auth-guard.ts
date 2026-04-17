@@ -57,3 +57,54 @@ export async function requireAdmin(locals: App.Locals): Promise<AuthenticatedUse
 
 	return user;
 }
+
+// ── Personal folder access ────────────────────────────────────────────────────
+
+/**
+ * Enforce that the requesting user can access the given relative path.
+ *
+ * Paths that live inside another user's personal folder are blocked with 403.
+ * Admins bypass this check entirely.
+ */
+export async function requirePathAccess(
+	user: AuthenticatedUser,
+	relativePath: string
+): Promise<void> {
+	if (user.role === 'ADMIN') return;
+
+	const normalized = relativePath.replace(/^\/+/, '');
+	const personalFolders = await db.personalFolder.findMany();
+
+	for (const folder of personalFolders) {
+		const folderPath = folder.path;
+		const isInside =
+			normalized === folderPath || normalized.startsWith(`${folderPath}/`);
+
+		if (isInside && folder.userId !== user.id) {
+			throw error(403, 'Access denied');
+		}
+	}
+}
+
+/**
+ * Filter a list of path entries, removing personal folders that belong to
+ * other users. Admins see everything.
+ */
+export async function filterPersonalEntries<T extends { path: string }>(
+	user: AuthenticatedUser,
+	entries: T[]
+): Promise<T[]> {
+	if (user.role === 'ADMIN') return entries;
+
+	const personalFolders = await db.personalFolder.findMany();
+	const otherPersonalPaths = personalFolders
+		.filter((f) => f.userId !== user.id)
+		.map((f) => f.path);
+
+	return entries.filter((entry) => {
+		const p = entry.path.replace(/^\/+/, '');
+		return !otherPersonalPaths.some(
+			(personal) => p === personal || p.startsWith(`${personal}/`)
+		);
+	});
+}

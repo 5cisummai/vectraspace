@@ -34,6 +34,19 @@ enum AgentRunStatus {
   FAILED
 }
 
+enum FsOperation {
+  DELETE
+  MOVE
+  COPY
+  MKDIR
+  UPLOAD
+}
+
+enum FsActionStatus {
+  DONE
+  UNDONE
+}
+
 // ---------------------------------------------------------------------------
 // User
 // ---------------------------------------------------------------------------
@@ -55,6 +68,21 @@ model User {
   workspaceMemberships     WorkspaceMember[]
   agentRuns                AgentRun[]
   workspaceFiles           WorkspaceFile[]
+  personalFolder           PersonalFolder?
+  fsActions                FileSystemAction[]
+}
+
+// ---------------------------------------------------------------------------
+// Personal Folders — user-private storage on drive 0
+// ---------------------------------------------------------------------------
+
+model PersonalFolder {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  path      String   @unique // relative path, e.g. "0/alice"
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 // ---------------------------------------------------------------------------
@@ -90,6 +118,7 @@ model Workspace {
   chats      ChatSession[]
   agentRuns  AgentRun[]
   files      WorkspaceFile[]
+  fsActions  FileSystemAction[]
 }
 
 model WorkspaceMember {
@@ -213,4 +242,25 @@ model AgentRun {
   @@index([workspaceId, chatId])
   @@index([chatId, status])
   @@index([userId, status])
+}
+
+// ---------------------------------------------------------------------------
+// FileSystemAction — undo/redo history for filesystem mutations
+// ---------------------------------------------------------------------------
+
+model FileSystemAction {
+  id          String         @id @default(cuid())
+  workspaceId String?
+  userId      String
+  operation   FsOperation
+  payload     Json           // operation-specific data needed for undo/redo
+  status      FsActionStatus @default(DONE)
+  description String         // human-readable, e.g. "Deleted 0/photos/img.jpg"
+  createdAt   DateTime       @default(now())
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt(sort: Desc)])
+  @@index([userId, workspaceId, status, createdAt(sort: Desc)])
 }

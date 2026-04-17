@@ -60,7 +60,11 @@ export const deleteFileTool = tool({
 	needsApproval: makeNeedsApproval('delete_file'),
 	execute: makeMutatingExecute('delete_file', async ({ path: relPath }, ctx) => {
 		if (!relPath) return 'Error: delete_file requires a non-empty "path" string.';
-		return deleteMediaPath(relPath, { userId: ctx.userId, isAdmin: ctx.isAdmin });
+		return deleteMediaPath(
+			relPath,
+			{ userId: ctx.userId, isAdmin: ctx.isAdmin },
+			{ userId: ctx.userId, workspaceId: ctx.workspaceId }
+		);
 	})
 });
 
@@ -120,13 +124,13 @@ export const moveTool = tool({
 			return moveManyMediaPaths(args.source_paths!, args.destination_directory!, {
 				userId: ctx.userId,
 				isAdmin: ctx.isAdmin
-			});
+			}, { userId: ctx.userId, workspaceId: ctx.workspaceId });
 		}
 		if (single) {
 			return moveMediaPath(args.source_path!, args.destination_path!, {
 				userId: ctx.userId,
 				isAdmin: ctx.isAdmin
-			});
+			}, { userId: ctx.userId, workspaceId: ctx.workspaceId });
 		}
 		return 'Error: move requires either "source_path" and "destination_path", or non-empty "source_paths" and "destination_directory".';
 	})
@@ -148,10 +152,12 @@ export const copyFileTool = tool({
 	execute: makeMutatingExecute('copy_file', async ({ source_path, destination_path }, ctx) => {
 		if (!source_path || !destination_path)
 			return 'Error: copy_file requires "source_path" and "destination_path".';
-		return copyMediaPath(source_path, destination_path, {
-			userId: ctx.userId,
-			isAdmin: ctx.isAdmin
-		});
+		return copyMediaPath(
+			source_path,
+			destination_path,
+			{ userId: ctx.userId, isAdmin: ctx.isAdmin },
+			{ userId: ctx.userId, workspaceId: ctx.workspaceId }
+		);
 	})
 });
 
@@ -166,8 +172,8 @@ export const mkdirTool = tool({
 		path: z.string().describe('Directory path to create (e.g. "0/incoming/2026").')
 	}),
 	needsApproval: makeNeedsApproval('mkdir'),
-	execute: makeMutatingExecute('mkdir', async ({ path: relPath }) => {
+	execute: makeMutatingExecute('mkdir', async ({ path: relPath }, ctx) => {
 		if (!relPath) return 'Error: mkdir requires a non-empty "path" string.';
-		return mkdirMediaPath(relPath);
+		return mkdirMediaPath(relPath, { userId: ctx.userId, workspaceId: ctx.workspaceId });
 	})
 });

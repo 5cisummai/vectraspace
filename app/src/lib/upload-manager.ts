@@ -9,6 +9,7 @@ export interface UploadFileItem {
 	name: string;
 	size: number;
 	destination: string;
+	workspaceId?: string | null;
 	status: UploadStatus;
 	progress: number;
 	error?: string;
@@ -78,6 +79,9 @@ async function uploadSingle(item: UploadFileItem): Promise<string | null> {
 		const formData = new FormData();
 		formData.append('file', item.file);
 		formData.append('destination', item.destination);
+		if (item.workspaceId) {
+			formData.append('workspaceId', item.workspaceId);
+		}
 
 		const xhr = new XMLHttpRequest();
 
@@ -136,13 +140,14 @@ async function indexUploadedPaths(paths: string[]): Promise<BatchIndexResponse> 
 	return (await response.json()) as BatchIndexResponse;
 }
 
-function addFiles(destination: string, incoming: FileList | File[]) {
+function addFiles(destination: string, incoming: FileList | File[], workspaceId?: string | null) {
 	const nextItems = Array.from(incoming).map((file) => ({
 		id: createUploadId(),
 		file,
 		name: file.name,
 		size: file.size,
 		destination,
+		workspaceId: workspaceId ?? null,
 		status: 'pending' as const,
 		progress: 0
 	}));
