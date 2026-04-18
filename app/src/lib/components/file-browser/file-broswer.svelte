@@ -1,10 +1,15 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import { invalidateAll } from '$app/navigation';
 	import { createEventDispatcher, onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import * as Resizable from '$lib/components/ui/resizable/index.js';
 	import * as Breadcrumb from '$lib/components/ui/breadcrumb/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
+	import { ButtonGroup } from '$lib/components/ui/button-group/index.js';
+	import FolderPlusIcon from '@lucide/svelte/icons/folder-plus';
+	import LayoutGridIcon from '@lucide/svelte/icons/layout-grid';
+	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import UploadIcon from '@lucide/svelte/icons/upload';
 	import Undo2Icon from '@lucide/svelte/icons/undo-2';
 	import Redo2Icon from '@lucide/svelte/icons/redo-2';
@@ -26,20 +31,54 @@
 		currentPath?: string;
 	} = $props();
 
+	const GRID_TILE_SIZE_KEY = 'fileBrowser.gridTileSize';
+
+	function readStoredGridTileSize(): number {
+		if (!browser) return 42;
+		try {
+			const raw = localStorage.getItem(GRID_TILE_SIZE_KEY);
+			if (raw == null) return 42;
+			const n = Number.parseInt(raw, 10);
+			if (Number.isNaN(n) || n < 0 || n > 100) return 42;
+			return n;
+		} catch {
+			return 42;
+		}
+	}
+
+	let gridTileSize = $state(42);
+	let gridTileSizeReady = $state(false);
+
+	$effect(() => {
+		if (!browser || !gridTileSizeReady) return;
+		localStorage.setItem(GRID_TILE_SIZE_KEY, String(gridTileSize));
+	});
+
+	/** Minimum column width (px) for the file grid — larger values yield bigger tiles. */
+	const gridMinTilePx = $derived(Math.round(88 + (gridTileSize / 100) * 200));
+
 	const dispatch = createEventDispatcher<{ select: FileEntry; pathChange: string }>();
-	let fileGrid = $state<{ triggerUpload: () => void } | null>(null);
+	let fileGrid = $state<{
+		triggerUpload: () => void;
+		triggerNewFolder: () => void;
+	} | null>(null);
 	let refreshing = $state(false);
 
 	onMount(() => {
+		gridTileSize = readStoredGridTileSize();
+		gridTileSizeReady = true;
 		fsHistory.refresh();
 	});
 
-	function handleSidebarSelect(event: CustomEvent<string>) {
-		const path = event.detail;
-		if (path) {
-			dispatch('pathChange', path);
+	function handleSidebarSelect(
+		event: CustomEvent<{ path: string; kind: 'file' | 'directory' }>
+	) {
+		const { path, kind } = event.detail;
+		if (kind === 'directory') {
+			if (path) dispatch('pathChange', path);
+			return;
 		}
-		dispatch('select', { path, name: path.split('/').pop() ?? '', type: 'directory' });
+		dispatch('select', { path, name: path.split('/').pop() ?? '', type: 'file' });
 	}
 
 	function handleGridSelect(event: CustomEvent<FileEntry>) {
@@ -111,7 +150,7 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <div class="flex h-full flex-col overflow-hidden">
-	<header class="flex shrink-0 items-center gap-2 border-b border-border px-4 py-3">
+	<header class="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-3">
 		<Breadcrumb.Root class="min-w-0 flex-1">
 			<Breadcrumb.List>
 				<Breadcrumb.Item>
@@ -141,41 +180,92 @@
 				{/each}
 			</Breadcrumb.List>
 		</Breadcrumb.Root>
-		<Button
-			type="button"
-			variant="outline"
-			size="sm"
-			class="shrink-0 gap-1.5"
-			disabled={!fsHistory.canUndo || fsHistory.loading}
-			title="Undo (Ctrl+Z)"
-			onclick={handleUndo}
-		>
-			<Undo2Icon class="size-4" />
-			Undo
-		</Button>
-		<Button
-			type="button"
-			variant="outline"
-			size="sm"
-			class="shrink-0 gap-1.5"
-			disabled={!fsHistory.canRedo || fsHistory.loading}
-			title="Redo (Ctrl+Shift+Z)"
-			onclick={handleRedo}
-		>
-			<Redo2Icon class="size-4" />
-			Redo
-		</Button>
-		<Button
-			type="button"
-			variant="outline"
-			size="sm"
-			class="shrink-0 gap-1.5"
-			disabled={refreshing}
-			onclick={() => fileGrid?.triggerUpload()}
-		>
-			<UploadIcon class="size-4" />
-			Upload
-		</Button>
+
+		<div class="flex shrink-0 flex-wrap items-center gap-2">
+			<ButtonGroup title="Tile size — drag to show more or fewer columns">
+				<div
+					data-slot="button-group-text"
+					class="bg-muted flex min-w-0 max-w-[11rem] items-center gap-2 rounded-md border px-2.5 py-1 text-sm font-medium shadow-xs sm:max-w-[13rem] [&_svg:not([class*='size-'])]:size-4"
+				>
+					<LayoutGridIcon class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+					<input
+						type="range"
+						min="0"
+						max="100"
+						bind:value={gridTileSize}
+						class="min-w-0 flex-1 cursor-pointer appearance-none bg-transparent accent-primary [&::-webkit-slider-runnable-track]:h-1 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-muted [&::-webkit-slider-thumb]:-mt-1 [&::-webkit-slider-thumb]:size-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-primary [&::-webkit-slider-thumb]:bg-background [&::-moz-range-track]:h-1 [&::-moz-range-track]:rounded-full [&::-moz-range-track]:bg-muted [&::-moz-range-thumb]:size-3 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-primary [&::-moz-range-thumb]:bg-background"
+						aria-label="File grid tile size"
+					/>
+				</div>
+			</ButtonGroup>
+
+			<ButtonGroup>
+				<Button
+					type="button"
+					variant="outline"
+					size="sm"
+					class="gap-1.5"
+					disabled={refreshing}
+					title="Reload folder contents"
+					aria-label="Refresh"
+					onclick={() => handleGridRefresh()}
+				>
+					<RefreshCwIcon class={`size-4 ${refreshing ? 'animate-spin' : ''}`} />
+					<span class="hidden sm:inline">Refresh</span>
+				</Button>
+				<Button
+					type="button"
+					variant="outline"
+					size="sm"
+					class="gap-1.5"
+					disabled={refreshing}
+					title="Create a new folder in the current path"
+					aria-label="New folder"
+					onclick={() => fileGrid?.triggerNewFolder()}
+				>
+					<FolderPlusIcon class="size-4" />
+					<span class="hidden sm:inline">New folder</span>
+				</Button>
+				<Button
+					type="button"
+					variant="outline"
+					size="sm"
+					class="gap-1.5"
+					disabled={refreshing}
+					title="Upload files"
+					aria-label="Upload"
+					onclick={() => fileGrid?.triggerUpload()}
+				>
+					<UploadIcon class="size-4" />
+					<span class="hidden sm:inline">Upload</span>
+				</Button>
+			</ButtonGroup>
+
+			<ButtonGroup title="History">
+				<Button
+					type="button"
+					variant="outline"
+					size="icon-sm"
+					disabled={!fsHistory.canUndo || fsHistory.loading}
+					title="Undo (Ctrl+Z)"
+					aria-label="Undo"
+					onclick={handleUndo}
+				>
+					<Undo2Icon class="size-4" />
+				</Button>
+				<Button
+					type="button"
+					variant="outline"
+					size="icon-sm"
+					disabled={!fsHistory.canRedo || fsHistory.loading}
+					title="Redo (Ctrl+Shift+Z)"
+					aria-label="Redo"
+					onclick={handleRedo}
+				>
+					<Redo2Icon class="size-4" />
+				</Button>
+			</ButtonGroup>
+		</div>
 	</header>
 
 	<Resizable.PaneGroup direction="horizontal" class="flex-1">
@@ -198,6 +288,7 @@
 				<FileGrid
 					bind:this={fileGrid}
 					fileTree={folderContents}
+					{gridMinTilePx}
 					{selectedPath}
 					{currentPath}
 					on:select={handleGridSelect}

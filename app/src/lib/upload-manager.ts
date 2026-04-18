@@ -69,6 +69,7 @@ function buildBatchMessage(uploadedCount: number, failedCount: number, indexedCo
 }
 
 async function uploadSingle(item: UploadFileItem): Promise<string | null> {
+	console.log('[upload-manager] uploadSingle called', { destination: item.destination });
 	patchItem(item.id, {
 		status: 'uploading',
 		progress: 0,
@@ -152,6 +153,7 @@ function addFiles(destination: string, incoming: FileList | File[], workspaceId?
 		progress: 0
 	}));
 
+	console.log('[upload-manager] addFiles called', { count: nextItems.length, destination, workspaceId });
 	if (nextItems.length === 0) return;
 
 	state.update((current) => ({
@@ -171,6 +173,7 @@ function addFiles(destination: string, incoming: FileList | File[], workspaceId?
 				? 0
 				: current.lastIndexedCount
 	}));
+	console.log('[upload-manager] items added, total:', get(state).items.length);
 }
 
 function removeFile(id: string) {

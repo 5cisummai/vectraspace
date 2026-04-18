@@ -25,8 +25,15 @@
 	let {
 		fileTree = [],
 		selectedPath = null,
-		currentPath = ''
-	}: { fileTree?: FileEntry[]; selectedPath?: string | null; currentPath?: string } = $props();
+		currentPath = '',
+		gridMinTilePx = 176
+	}: {
+		fileTree?: FileEntry[];
+		selectedPath?: string | null;
+		currentPath?: string;
+		/** Minimum column width — larger values produce bigger tiles and fewer columns. */
+		gridMinTilePx?: number;
+	} = $props();
 
 	const dispatch = createEventDispatcher<{ select: FileEntry; refresh: void }>();
 
@@ -185,10 +192,27 @@
 	}
 
 	let fileInput: HTMLInputElement | undefined = $state();
+	/** Bound to the grid background context menu so we can close it after opening the file picker. */
+	let gridContextMenuOpen = $state(false);
 
 	function openUploadPicker() {
 		if (!requireDirectory()) return;
 		fileInput?.click();
+	}
+
+	/**
+	 * Opening a hidden file input from a context menu item must not close the menu in the same
+	 * turn: bits-ui closes the menu after select, which can unmount the portal and cancel the
+	 * native file picker (no change event, no `/api/upload` request). We prevent that close,
+	 * trigger the picker, then dismiss the menu on a microtask.
+	 */
+	function onUploadMenuSelect(e: Event) {
+		if (!requireDirectory()) return;
+		e.preventDefault();
+		fileInput?.click();
+		queueMicrotask(() => {
+			gridContextMenuOpen = false;
+		});
 	}
 
 	/** Header / toolbar “Upload” triggers the same file picker as the context menu. */
@@ -196,16 +220,39 @@
 		openUploadPicker();
 	}
 
-	async function onUploadPicked(event: Event) {
-		const input = event.currentTarget as HTMLInputElement;
-		const files = input.files;
-		input.value = '';
-		if (!files?.length || !currentPath?.trim()) return;
+	/** Header / toolbar “New folder” opens the same dialog as the grid context menu. */
+	export function triggerNewFolder() {
+		newFolder();
+	}
 
-		uploadManager.addFiles(currentPath, files, workspaceStore.activeId);
+	async function onUploadPicked(event: Event) {
+		const input = event.target as HTMLInputElement;
+		// Clone files to preserve them before resetting input
+		const fileArray = input.multiple 
+			? Array.from(input.files || []) 
+			: input.files ? [input.files[0]] : [];
+		
+		console.log('[upload] onUploadPicked called', { fileCount: fileArray.length, currentPath });
+		
+		// Reset input to allow re-selecting same files
+		input.value = '';
+		
+		if (!fileArray.length) {
+			toast('No files selected');
+			return;
+		}
+		if (!currentPath?.trim()) {
+			toast('Pick a location', { description: 'Open a folder first' });
+			return;
+		}
+
+		const fileList = new DataTransfer();
+		fileArray.forEach(f => fileList.items.add(f));
+		uploadManager.addFiles(currentPath, fileList.files, workspaceStore.activeId);
 		uploadManager.uploadAll();
 		fsHistory.refresh();
 		notifyRefresh();
+		toast('Uploading', { description: `${files.length} file(s)` });
 	}
 
 	function refresh() {
@@ -219,7 +266,6 @@
 	type="file"
 	class="sr-only"
 	multiple
-	aria-hidden="true"
 	tabindex={-1}
 	onchange={onUploadPicked}
 />
@@ -290,7 +336,7 @@
 	</Dialog.Content>
 </Dialog.Root>
 
-<ContextMenu.Root>
+<ContextMenu.Root bind:open={gridContextMenuOpen}>
 	<ContextMenu.Trigger class="flex h-full flex-col p-3">
 		<div class="mb-3 flex shrink-0 items-center justify-between">
 			<p class="text-xs font-medium tracking-wide text-muted-foreground uppercase">Files</p>
@@ -298,20 +344,23 @@
 		</div>
 
 		<div class="flex-1 overflow-auto">
-			<ul class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+			<ul
+				class="grid gap-3"
+				style="grid-template-columns: repeat(auto-fill, minmax(min(100%, {gridMinTilePx}px), 1fr));"
+			>
 				{#each items as item (item.path)}
 					<li>
 						<ContextMenu.Root>
 							<ContextMenu.Trigger>
 								<Button
 									variant="ghost"
-									class="h-auto w-full rounded-xl p-1 text-left {selectedPath === item.path
+									class="aspect-square h-auto w-full flex-col items-stretch justify-start gap-1 whitespace-normal rounded-xl p-1 text-center {selectedPath === item.path
 										? 'bg-muted ring-1 ring-ring/60'
 										: ''}"
 									onclick={() => selectEntry(item)}
 								>
 									<FilePreviewTile
-										class="w-full"
+										class="h-full w-full min-h-0"
 										item={{
 											name: item.name,
 											path: item.path,
@@ -339,7 +388,7 @@
 
 	<ContextMenu.Content class="w-48">
 		<ContextMenu.Item onclick={newFolder}>New folder</ContextMenu.Item>
-		<ContextMenu.Item onclick={openUploadPicker}>Upload file</ContextMenu.Item>
+		<ContextMenu.Item onSelect={onUploadMenuSelect}>Upload file</ContextMenu.Item>
 		<ContextMenu.Separator />
 		<ContextMenu.Item onclick={refresh}>Refresh</ContextMenu.Item>
 	</ContextMenu.Content>

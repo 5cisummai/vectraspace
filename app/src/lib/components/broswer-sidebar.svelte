@@ -6,7 +6,9 @@
 	import type { ComponentProps } from 'svelte';
 	import type { FileEntry } from '$lib/components/file-browser/file-grid.svelte';
 
-	const dispatch = createEventDispatcher<{ select: string }>();
+	const dispatch = createEventDispatcher<{
+		select: { path: string; kind: 'file' | 'directory' };
+	}>();
 	let {
 		ref = $bindable(null),
 		activePath = null,
@@ -19,7 +21,7 @@
 
 	const sidebarTree = $derived((tree ?? $page.data.fileTree ?? []) as FileEntry[]);
 
-	function handleSelect(event: CustomEvent<string>) {
+	function handleSelect(event: CustomEvent<{ path: string; kind: 'file' | 'directory' }>) {
 		dispatch('select', event.detail);
 	}
 </script>

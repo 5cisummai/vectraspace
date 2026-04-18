@@ -162,7 +162,11 @@
 			const name = node.name ?? node.title ?? `Item ${index + 1}`;
 			const path = node.path ?? name;
 			const isDirectory =
-				node.type === 'directory' || node.type === 'folder' || !!node.children?.length;
+				node.type === 'file'
+					? false
+					: node.type === 'directory' ||
+						node.type === 'folder' ||
+						node.children != null;
 			return {
 				id: path,
 				name,

@@ -32,7 +32,9 @@
 		isSubTree?: boolean;
 	} = $props();
 
-	const dispatch = createEventDispatcher<{ select: string }>();
+	const dispatch = createEventDispatcher<{
+		select: { path: string; kind: 'file' | 'directory' };
+	}>();
 	let expandedFolders: string[] = [];
 
 	function getName(item: FileTreeNode) {
@@ -62,7 +64,8 @@
 	function isFolder(item: FileTreeNode) {
 		if (Array.isArray(item)) return true;
 		if (typeof item === 'string') return false;
-		return item.type === 'directory' || item.type === 'folder' || !!item.children?.length;
+		if (item.type === 'file') return false;
+		return item.type === 'directory' || item.type === 'folder' || Array.isArray(item.children);
 	}
 
 	function isExpanded(path: string) {
@@ -75,12 +78,12 @@
 			: [...expandedFolders, path];
 	}
 
-	function select(path: string) {
-		dispatch('select', path);
+	function select(path: string, kind: 'file' | 'directory') {
+		dispatch('select', { path, kind });
 	}
 
-	function handleSelect(path: string) {
-		dispatch('select', path);
+	function handleSelect(detail: { path: string; kind: 'file' | 'directory' }) {
+		dispatch('select', detail);
 	}
 </script>
 
@@ -120,7 +123,7 @@
 				class="h-auto w-full justify-start gap-2 px-2 py-1.5 text-sm {isSubTree
 					? 'rounded-sm'
 					: 'rounded-md'}"
-				onclick={() => select(path)}
+				onclick={() => select(path, 'directory')}
 			>
 				<FolderIcon class="size-4 shrink-0 text-muted-foreground" />
 				<span class="truncate">{name}</span>
@@ -132,7 +135,7 @@
 			class="h-auto w-full justify-start gap-2 px-2 py-1.5 text-sm {isSubTree
 				? 'rounded-sm'
 				: 'rounded-md'}"
-			onclick={() => select(path)}
+			onclick={() => select(path, 'file')}
 		>
 			<FileIcon class="size-4 shrink-0 text-muted-foreground" />
 			<span class="truncate">{name}</span>

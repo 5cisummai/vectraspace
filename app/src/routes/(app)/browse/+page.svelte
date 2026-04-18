@@ -25,7 +25,11 @@
 			const name = node.name ?? node.title ?? `Item ${index + 1}`;
 			const path = node.path ?? name;
 			const isDirectory =
-				node.type === 'directory' || node.type === 'folder' || !!node.children?.length;
+				node.type === 'file'
+					? false
+					: node.type === 'directory' ||
+						node.type === 'folder' ||
+						node.children != null;
 			return {
 				id: path,
 				name,
@@ -60,9 +64,14 @@
 	}
 
 	function handleFileSelect(event: CustomEvent<FileEntry>) {
+		const entry = event.detail;
+		if (entry.type === 'directory') {
+			handlePathChange(entry.path);
+			return;
+		}
 		const media = resolve('/(app)/browse/media');
 		// eslint-disable-next-line svelte/no-navigation-without-resolve
-		goto(`${media}?file=${encodeURIComponent(event.detail.path)}`, { keepFocus: true });
+		goto(`${media}?file=${encodeURIComponent(entry.path)}`, { keepFocus: true });
 	}
 </script>
 

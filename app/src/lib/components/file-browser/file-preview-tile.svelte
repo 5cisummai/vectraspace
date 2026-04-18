@@ -75,10 +75,10 @@
 	const showVideoPreview = $derived(isVideo && !!mediaUrl);
 </script>
 
-<article class={`group flex min-w-0 flex-col gap-2 ${className}`}>
+<article class={`group flex min-h-0 min-w-0 flex-col gap-1 ${className}`}>
 	{#if showImagePreview}
 		<div
-			class="relative aspect-square overflow-hidden rounded-lg bg-muted/25 transition-colors group-hover:bg-muted/40"
+			class="relative min-h-0 flex-1 overflow-hidden rounded-lg bg-muted/25 transition-colors group-hover:bg-muted/40"
 		>
 			<img
 				src={mediaUrl}
@@ -90,7 +90,7 @@
 		</div>
 	{:else if showVideoPreview}
 		<div
-			class="relative aspect-square overflow-hidden rounded-lg bg-muted/25 transition-colors group-hover:bg-muted/40"
+			class="relative min-h-0 flex-1 overflow-hidden rounded-lg bg-muted/25 transition-colors group-hover:bg-muted/40"
 		>
 			<video
 				src={mediaUrl}
@@ -103,14 +103,14 @@
 		</div>
 	{:else}
 		<div
-			class="flex aspect-square items-center justify-center rounded-lg text-muted-foreground transition-colors group-hover:text-foreground"
+			class="relative min-h-0 flex-1 overflow-hidden rounded-lg text-muted-foreground transition-colors group-hover:text-foreground"
 			aria-hidden="true"
 		>
-			<TileIcon class="size-12 shrink-0" />
+			<TileIcon class="absolute left-2 top-2 block size-[calc(100%-1rem)]" />
 		</div>
 	{/if}
 
-	<div class="min-w-0">
-		<p class="truncate text-sm font-medium text-foreground">{normalizedName}</p>
+	<div class="w-full min-w-0 shrink-0 px-0.5">
+		<p class="truncate text-center text-sm font-medium text-foreground">{normalizedName}</p>
 	</div>
 </article>
