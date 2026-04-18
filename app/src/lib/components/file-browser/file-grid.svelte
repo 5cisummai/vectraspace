@@ -24,18 +24,30 @@
 
 	let {
 		fileTree = [],
-		selectedPath = null,
+		selectedPaths = [],
 		currentPath = '',
 		gridMinTilePx = 176
 	}: {
 		fileTree?: FileEntry[];
-		selectedPath?: string | null;
+		selectedPaths?: string[];
 		currentPath?: string;
 		/** Minimum column width — larger values produce bigger tiles and fewer columns. */
 		gridMinTilePx?: number;
 	} = $props();
 
-	const dispatch = createEventDispatcher<{ select: FileEntry; refresh: void }>();
+	const dispatch = createEventDispatcher<{
+		highlight: { paths: string[] };
+		activate: FileEntry;
+		refresh: void;
+	}>();
+
+	/** Last non-shift anchor for shift+click range selection (folder listing order). */
+	let rangeAnchorPath = $state<string | null>(null);
+
+	$effect(() => {
+		void currentPath;
+		rangeAnchorPath = null;
+	});
 
 	type FlatEntry = FileEntry & { path: string };
 
@@ -73,12 +85,96 @@
 		dispatch('refresh');
 	}
 
-	function selectEntry(entry: FlatEntry) {
-		dispatch('select', entry);
+	function setSelection(paths: string[]) {
+		dispatch('highlight', { paths });
 	}
 
-	function openEntry(entry: FlatEntry) {
-		selectEntry(entry);
+	function activateEntry(entry: FlatEntry) {
+		dispatch('activate', entry);
+	}
+
+	function onTileClick(entry: FlatEntry, e: MouseEvent) {
+		const idx = items.findIndex((i) => i.path === entry.path);
+		if (idx < 0) return;
+
+		if (e.shiftKey) {
+			const anchorIdx =
+				rangeAnchorPath != null
+					? items.findIndex((i) => i.path === rangeAnchorPath)
+					: idx;
+			const start = anchorIdx >= 0 ? anchorIdx : idx;
+			const lo = Math.min(start, idx);
+			const hi = Math.max(start, idx);
+			const paths = items.slice(lo, hi + 1).map((i) => i.path);
+			setSelection(paths);
+			return;
+		}
+
+		if (e.metaKey || e.ctrlKey) {
+			const set = new Set(selectedPaths);
+			if (set.has(entry.path)) set.delete(entry.path);
+			else set.add(entry.path);
+			rangeAnchorPath = entry.path;
+			setSelection(Array.from(set));
+			return;
+		}
+
+		const onlySelected = selectedPaths.length === 1 && selectedPaths[0] === entry.path;
+		if (onlySelected) {
+			activateEntry(entry);
+			return;
+		}
+
+		if (selectedPaths.length > 1 && selectedPaths.includes(entry.path)) {
+			setSelection([entry.path]);
+			rangeAnchorPath = entry.path;
+			return;
+		}
+
+		rangeAnchorPath = entry.path;
+		setSelection([entry.path]);
+	}
+
+	function onTileKeydown(entry: FlatEntry, e: KeyboardEvent) {
+		if (e.key !== 'Enter' && e.key !== ' ') return;
+		if (selectedPaths.length > 1 && selectedPaths.includes(entry.path)) {
+			e.preventDefault();
+			activateEntry(entry);
+		}
+	}
+
+	function clearSelection() {
+		rangeAnchorPath = null;
+		setSelection([]);
+	}
+
+	function shouldIgnoreEscapeTarget(target: EventTarget | null): boolean {
+		if (!(target instanceof HTMLElement)) return true;
+		if (target.closest('[role="dialog"]')) return true;
+		if (target.closest('[role="alertdialog"]')) return true;
+		const tag = target.tagName.toLowerCase();
+		if (tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable) {
+			return true;
+		}
+		return false;
+	}
+
+	function onWindowKeydown(e: KeyboardEvent) {
+		if (e.key !== 'Escape') return;
+		if (selectedPaths.length === 0) return;
+		if (shouldIgnoreEscapeTarget(e.target)) return;
+		if (document.activeElement && shouldIgnoreEscapeTarget(document.activeElement)) return;
+		e.preventDefault();
+		clearSelection();
+	}
+
+	function onPanePointerDown(e: PointerEvent) {
+		const target = e.target as HTMLElement;
+		if (target.closest('button')) return;
+		if (target.closest('[role="menu"]')) return;
+		if (target.closest('[data-slot="dialog-content"]')) return;
+		if (selectedPaths.length === 0) return;
+		clearSelection();
 	}
 
 	async function copyPath(path: string) {
@@ -252,7 +348,7 @@
 		uploadManager.uploadAll();
 		fsHistory.refresh();
 		notifyRefresh();
-		toast('Uploading', { description: `${files.length} file(s)` });
+		toast('Uploading', { description: `${fileArray.length} file(s)` });
 	}
 
 	function refresh() {
@@ -269,6 +365,8 @@
 	tabindex={-1}
 	onchange={onUploadPicked}
 />
+
+<svelte:window onkeydown={onWindowKeydown} />
 
 <Dialog.Root bind:open={newFolderDialogOpen}>
 	<Dialog.Content showCloseButton={!newFolderSubmitting}>
@@ -338,26 +436,37 @@
 
 <ContextMenu.Root bind:open={gridContextMenuOpen}>
 	<ContextMenu.Trigger class="flex h-full flex-col p-3">
-		<div class="mb-3 flex shrink-0 items-center justify-between">
-			<p class="text-xs font-medium tracking-wide text-muted-foreground uppercase">Files</p>
-			<p class="text-xs text-muted-foreground">{items.length} items</p>
-		</div>
+		<div
+			class="flex min-h-0 min-w-0 flex-1 flex-col"
+			role="presentation"
+			onpointerdown={onPanePointerDown}
+		>
+			<div class="mb-3 flex shrink-0 items-center justify-between">
+				<p class="text-xs font-medium tracking-wide text-muted-foreground uppercase">Files</p>
+				<p class="text-xs text-muted-foreground">{items.length} items</p>
+			</div>
 
-		<div class="flex-1 overflow-auto">
+			<div class="min-h-0 flex-1 overflow-auto">
 			<ul
 				class="grid gap-3"
+				role="listbox"
+				aria-multiselectable="true"
 				style="grid-template-columns: repeat(auto-fill, minmax(min(100%, {gridMinTilePx}px), 1fr));"
 			>
 				{#each items as item (item.path)}
-					<li>
+					<li role="presentation">
 						<ContextMenu.Root>
 							<ContextMenu.Trigger>
 								<Button
+									type="button"
 									variant="ghost"
-									class="aspect-square h-auto w-full flex-col items-stretch justify-start gap-1 whitespace-normal rounded-xl p-1 text-center {selectedPath === item.path
-										? 'bg-muted ring-1 ring-ring/60'
+									role="option"
+									aria-selected={selectedPaths.includes(item.path)}
+									class="aspect-square h-auto w-full flex-col items-stretch justify-start gap-1 whitespace-normal rounded-xl p-1 text-center {selectedPaths.includes(item.path)
+										? 'bg-muted'
 										: ''}"
-									onclick={() => selectEntry(item)}
+									onclick={(e) => onTileClick(item, e)}
+									onkeydown={(e) => onTileKeydown(item, e)}
 								>
 									<FilePreviewTile
 										class="h-full w-full min-h-0"
@@ -371,7 +480,7 @@
 								</Button>
 							</ContextMenu.Trigger>
 							<ContextMenu.Content class="w-48">
-								<ContextMenu.Item onclick={() => openEntry(item)}>Open</ContextMenu.Item>
+								<ContextMenu.Item onclick={() => activateEntry(item)}>Open</ContextMenu.Item>
 								<ContextMenu.Item onclick={renameNotSupported}>Rename</ContextMenu.Item>
 								<ContextMenu.Item onclick={() => copyPath(item.path)}>Copy path</ContextMenu.Item>
 								<ContextMenu.Separator />
@@ -383,6 +492,7 @@
 					</li>
 				{/each}
 			</ul>
+			</div>
 		</div>
 	</ContextMenu.Trigger>
 

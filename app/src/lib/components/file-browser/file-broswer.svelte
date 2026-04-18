@@ -27,9 +27,22 @@
 	}: {
 		fileTree?: FileEntry[];
 		folderContents?: FileEntry[];
+		/** When set, overrides grid-only keyboard/mouse selection highlight. */
 		selectedPath?: string | null;
 		currentPath?: string;
 	} = $props();
+
+	let gridLocalSelectedPaths = $state<string[]>([]);
+
+	$effect(() => {
+		void currentPath;
+		gridLocalSelectedPaths = [];
+	});
+
+	/** Parent may pin a single path; otherwise grid owns multi-select state. */
+	const effectiveGridSelectedPaths = $derived(
+		selectedPath != null && selectedPath !== '' ? [selectedPath] : gridLocalSelectedPaths
+	);
 
 	const GRID_TILE_SIZE_KEY = 'fileBrowser.gridTileSize';
 
@@ -78,10 +91,15 @@
 			if (path) dispatch('pathChange', path);
 			return;
 		}
+		gridLocalSelectedPaths = [];
 		dispatch('select', { path, name: path.split('/').pop() ?? '', type: 'file' });
 	}
 
-	function handleGridSelect(event: CustomEvent<FileEntry>) {
+	function handleGridHighlight(event: CustomEvent<{ paths: string[] }>) {
+		gridLocalSelectedPaths = event.detail.paths;
+	}
+
+	function handleGridActivate(event: CustomEvent<FileEntry>) {
 		const entry = event.detail;
 		if (entry.type === 'directory') {
 			dispatch('pathChange', entry.path);
@@ -289,9 +307,10 @@
 					bind:this={fileGrid}
 					fileTree={folderContents}
 					{gridMinTilePx}
-					{selectedPath}
+					selectedPaths={effectiveGridSelectedPaths}
 					{currentPath}
-					on:select={handleGridSelect}
+					on:highlight={handleGridHighlight}
+					on:activate={handleGridActivate}
 					on:refresh={handleGridRefresh}
 				/>
 			{/if}

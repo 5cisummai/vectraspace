@@ -1,7 +1,7 @@
 import { json, error } from '@sveltejs/kit';
 import fs from 'node:fs/promises';
 import * as path from '$lib/server/paths';
-import { isPathInsideRoot, resolveSafePath } from '$lib/server/services/storage';
+import { isPathInsideRoot, resolveMediaPath } from '$lib/server/services/storage';
 import { requireAuth, requirePathAccess } from '$lib/server/api';
 import { db } from '$lib/server/db';
 import { env } from '$env/dynamic/private';
@@ -28,7 +28,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 	await requirePathAccess(user, destination);
 
-	const resolved = resolveSafePath(destination);
+	const resolved = await resolveMediaPath(destination, user);
 	if (!resolved) throw error(400, 'Invalid destination path');
 
 	// Sanitize filename — strip path separators, null bytes

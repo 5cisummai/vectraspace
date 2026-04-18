@@ -9,7 +9,7 @@ import fs from 'node:fs/promises';
 import { db } from '$lib/server/db';
 import { FsOperation, FsActionStatus } from '@prisma/client';
 import { restoreFromTrash, cleanTrashEntry } from '$lib/server/trash';
-import { resolveSafePath } from '$lib/server/services/storage';
+import { resolveMediaPathForUserId } from '$lib/server/services/storage';
 import * as path from '$lib/server/paths';
 
 export { FsOperation, FsActionStatus };
@@ -100,7 +100,7 @@ export async function undoUserAction(userId: string, workspaceId?: string | null
 		switch (action.operation) {
 			case FsOperation.DELETE: {
 				const p = payload as DeletePayload;
-				const resolved = resolveSafePath(p.relativePath);
+				const resolved = await resolveMediaPathForUserId(p.relativePath, userId);
 				if (!resolved) throw new Error(`Invalid path: ${p.relativePath}`);
 				await restoreFromTrash(p.trashKey, resolved.fullPath, p.root);
 				// Restore UploadedFile DB record if it existed
@@ -115,8 +115,8 @@ export async function undoUserAction(userId: string, workspaceId?: string | null
 			}
 			case FsOperation.MOVE: {
 				const p = payload as MovePayload;
-				const srcRes = resolveSafePath(p.to);
-				const dstRes = resolveSafePath(p.from);
+				const srcRes = await resolveMediaPathForUserId(p.to, userId);
+				const dstRes = await resolveMediaPathForUserId(p.from, userId);
 				if (!srcRes || !dstRes) throw new Error('Invalid move paths');
 				await fs.rename(srcRes.fullPath, dstRes.fullPath);
 				// Update UploadedFile records
@@ -130,7 +130,7 @@ export async function undoUserAction(userId: string, workspaceId?: string | null
 			}
 			case FsOperation.COPY: {
 				const p = payload as CopyPayload;
-				const resolved = resolveSafePath(p.destination);
+				const resolved = await resolveMediaPathForUserId(p.destination, userId);
 				if (!resolved) throw new Error(`Invalid path: ${p.destination}`);
 				const stat = await fs.stat(resolved.fullPath);
 				if (stat.isDirectory()) {
@@ -145,7 +145,7 @@ export async function undoUserAction(userId: string, workspaceId?: string | null
 			}
 			case FsOperation.MKDIR: {
 				const p = payload as MkdirPayload;
-				const resolved = resolveSafePath(p.path);
+				const resolved = await resolveMediaPathForUserId(p.path, userId);
 				if (!resolved) throw new Error(`Invalid path: ${p.path}`);
 				try {
 					await fs.rmdir(resolved.fullPath);
@@ -165,7 +165,7 @@ export async function undoUserAction(userId: string, workspaceId?: string | null
 			}
 			case FsOperation.UPLOAD: {
 				const p = payload as UploadPayload;
-				const resolved = resolveSafePath(p.relativePath);
+				const resolved = await resolveMediaPathForUserId(p.relativePath, userId);
 				if (!resolved) throw new Error(`Invalid path: ${p.relativePath}`);
 				await fs.unlink(resolved.fullPath);
 				await db.uploadedFile
@@ -210,7 +210,7 @@ export async function redoUserAction(userId: string, workspaceId?: string | null
 		switch (action.operation) {
 			case FsOperation.DELETE: {
 				const p = payload as DeletePayload;
-				const resolved = resolveSafePath(p.relativePath);
+				const resolved = await resolveMediaPathForUserId(p.relativePath, userId);
 				if (!resolved) throw new Error(`Invalid path: ${p.relativePath}`);
 				// Re-delete: move back to trash
 				const { moveToTrash } = await import('$lib/server/trash');
@@ -222,8 +222,8 @@ export async function redoUserAction(userId: string, workspaceId?: string | null
 			}
 			case FsOperation.MOVE: {
 				const p = payload as MovePayload;
-				const srcRes = resolveSafePath(p.from);
-				const dstRes = resolveSafePath(p.to);
+				const srcRes = await resolveMediaPathForUserId(p.from, userId);
+				const dstRes = await resolveMediaPathForUserId(p.to, userId);
 				if (!srcRes || !dstRes) throw new Error('Invalid move paths');
 				await fs.rename(srcRes.fullPath, dstRes.fullPath);
 				await db.uploadedFile
@@ -241,7 +241,7 @@ export async function redoUserAction(userId: string, workspaceId?: string | null
 			}
 			case FsOperation.MKDIR: {
 				const p = payload as MkdirPayload;
-				const resolved = resolveSafePath(p.path);
+				const resolved = await resolveMediaPathForUserId(p.path, userId);
 				if (!resolved) throw new Error(`Invalid path: ${p.path}`);
 				await fs.mkdir(resolved.fullPath);
 				break;

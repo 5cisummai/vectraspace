@@ -8,7 +8,7 @@ export const GET: RequestHandler = async ({ params, locals }) => {
 	try {
 		const relativePath = params.path ?? '';
 		await requirePathAccess(user, relativePath);
-		const entries = await listDirectory(relativePath);
+		const entries = await listDirectory(relativePath, user);
 		const filtered = await filterPersonalEntries(user, entries);
 
 		// Strip fullPath before sending to client

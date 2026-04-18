@@ -3,8 +3,11 @@ import jwt from 'jsonwebtoken';
 import fs from 'node:fs/promises';
 import { db } from '$lib/server/db';
 import { env } from '$env/dynamic/private';
-import { getMediaRoots } from '$lib/server/services/storage';
-import * as path from '$lib/server/paths';
+import {
+	getMediaRoots,
+	physicalRelativePathForUsername,
+	resolveSafePath
+} from '$lib/server/services/storage';
 import type { UserRole } from '@prisma/client';
 
 const ARGON2_OPTIONS = {
@@ -107,18 +110,19 @@ export async function createUser(opts: {
 			}
 		});
 
-		// Create a personal folder on drive 0 for every new user
+		// Personal folder: virtual path = username; physical = hidden dir on drive 0
 		const roots = getMediaRoots();
 		if (roots.length > 0) {
-			const drive0Root = path.resolve(roots[0]);
-			const folderName = opts.username;
-			const fullPath = path.join(drive0Root, folderName);
-			const relativePath = `0/${folderName}`;
+			const physicalRel = physicalRelativePathForUsername(opts.username);
+			const resolved = resolveSafePath(physicalRel);
+			const virtualPath = opts.username;
 
 			try {
-				await fs.mkdir(fullPath, { recursive: true });
+				if (resolved) {
+					await fs.mkdir(resolved.fullPath, { recursive: true });
+				}
 				await tx.personalFolder.create({
-					data: { userId: user.id, path: relativePath }
+					data: { userId: user.id, path: virtualPath }
 				});
 			} catch (err) {
 				// Log but don't fail the signup — folder can be created later

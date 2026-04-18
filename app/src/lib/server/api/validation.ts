@@ -18,7 +18,10 @@ export const usernameSchema = z
 	.string()
 	.min(3, 'Username must be at least 3 characters')
 	.max(64, 'Username must be at most 64 characters')
-	.transform((v) => v.trim().toLowerCase());
+	.transform((v) => v.trim().toLowerCase())
+	.refine((s) => !/^\d+$/.test(s), {
+		message: 'Username cannot be only digits (reserved for drive indexes in the media browser)'
+	});
 
 /** Display name: 1-128 chars, trimmed */
 export const displayNameSchema = z

@@ -1,5 +1,9 @@
 import { error } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
+import {
+	ensurePersonalFolderMigration,
+	virtualRootForFolder
+} from '$lib/server/services/storage';
 import type { UserRole } from '@prisma/client';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -70,17 +74,41 @@ export async function requirePathAccess(
 	user: AuthenticatedUser,
 	relativePath: string
 ): Promise<void> {
+	await ensurePersonalFolderMigration();
+
 	if (user.role === 'ADMIN') return;
 
 	const normalized = relativePath.replace(/^\/+/, '');
-	const personalFolders = await db.personalFolder.findMany();
+
+	// Block direct access to another user's hidden physical personal directory
+	const hidden = normalized.match(/^\d+\/\.personal_([^/]+)(?:\/|$)/);
+	if (hidden) {
+		const ownerUsername = hidden[1];
+		if (ownerUsername !== user.username) {
+			throw error(403, 'Access denied');
+		}
+		return;
+	}
+
+	const personalFolders = await db.personalFolder.findMany({
+		include: { user: { select: { username: true } } }
+	});
 
 	for (const folder of personalFolders) {
-		const folderPath = folder.path;
+		const folderPath = virtualRootForFolder(folder);
 		const isInside =
 			normalized === folderPath || normalized.startsWith(`${folderPath}/`);
 
 		if (isInside && folder.userId !== user.id) {
+			throw error(403, 'Access denied');
+		}
+
+		// Legacy DB paths (`0/<name>`) before migration
+		if (!folder.path.includes('/')) continue;
+		const legacyPath = folder.path;
+		const insideLegacy =
+			normalized === legacyPath || normalized.startsWith(`${legacyPath}/`);
+		if (insideLegacy && folder.userId !== user.id) {
 			throw error(403, 'Access denied');
 		}
 	}
@@ -94,17 +122,23 @@ export async function filterPersonalEntries<T extends { path: string }>(
 	user: AuthenticatedUser,
 	entries: T[]
 ): Promise<T[]> {
+	await ensurePersonalFolderMigration();
+
 	if (user.role === 'ADMIN') return entries;
 
-	const personalFolders = await db.personalFolder.findMany();
-	const otherPersonalPaths = personalFolders
+	const personalFolders = await db.personalFolder.findMany({
+		include: { user: { select: { username: true } } }
+	});
+	const blockedPrefixes = personalFolders
 		.filter((f) => f.userId !== user.id)
-		.map((f) => f.path);
+		.flatMap((f) => {
+			const roots = [virtualRootForFolder(f)];
+			if (f.path.includes('/')) roots.push(f.path);
+			return roots;
+		});
 
 	return entries.filter((entry) => {
 		const p = entry.path.replace(/^\/+/, '');
-		return !otherPersonalPaths.some(
-			(personal) => p === personal || p.startsWith(`${personal}/`)
-		);
+		return !blockedPrefixes.some((prefix) => p === prefix || p.startsWith(`${prefix}/`));
 	});
 }

@@ -73,13 +73,13 @@ model User {
 }
 
 // ---------------------------------------------------------------------------
-// Personal Folders — user-private storage on drive 0
+// Personal Folders — virtual `<username>` at media root → hidden `0/.personal_<username>` on disk
 // ---------------------------------------------------------------------------
 
 model PersonalFolder {
   id        String   @id @default(cuid())
   userId    String   @unique
-  path      String   @unique // relative path, e.g. "0/alice"
+  path      String   @unique // virtual client path (username), e.g. "alice"
   createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)

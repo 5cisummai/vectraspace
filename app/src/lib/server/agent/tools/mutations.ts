@@ -55,7 +55,9 @@ export const deleteFileTool = tool({
 	name: 'delete_file',
 	description: 'Permanently delete a file or folder under a media root.',
 	parameters: z.object({
-		path: z.string().describe('Path in rootIndex/path format (e.g. "0/photos/old.jpg").')
+		path: z
+			.string()
+			.describe('Media path: rootIndex/… (e.g. "0/photos/old.jpg") or "<username>/…" in your personal folder.')
 	}),
 	needsApproval: makeNeedsApproval('delete_file'),
 	execute: makeMutatingExecute('delete_file', async ({ path: relPath }, ctx) => {

@@ -2,7 +2,7 @@ import { error, json } from '@sveltejs/kit';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import * as path from '$lib/server/paths';
-import { resolveSafePath } from '$lib/server/services/storage';
+import { resolveMediaPath } from '$lib/server/services/storage';
 import { deleteSemanticEntryByRelativePath } from '$lib/server/semantic';
 import { db } from '$lib/server/db';
 import { requireAuth, requirePathAccess, audit } from '$lib/server/api';
@@ -33,7 +33,7 @@ export const DELETE: RequestHandler = async ({ params, locals, request }) => {
 
 	const relativePath = params.path ?? '';
 	await requirePathAccess(user, relativePath);
-	const resolved = resolveSafePath(relativePath);
+	const resolved = await resolveMediaPath(relativePath, user);
 	if (!resolved) throw error(400, 'Invalid path');
 
 	if (path.resolve(resolved.fullPath) === path.resolve(resolved.root)) {

@@ -1,6 +1,8 @@
 import fs from 'node:fs/promises';
+import type { UserRole } from '@prisma/client';
 import * as path from '$lib/server/paths';
 import { env } from '$env/dynamic/private';
+import { db } from '$lib/server/db';
 
 export type MediaType = 'video' | 'audio' | 'image' | 'document' | 'other';
 
@@ -105,6 +107,190 @@ export function resolveSafePath(relativePath: string): { fullPath: string; root:
 	return { fullPath, root };
 }
 
+// ── Personal folders (virtual `<username>` at media root → hidden `0/.personal_<username>`) ──
+
+export const PERSONAL_DISK_PREFIX = '.personal_';
+
+export function physicalRelativePathForUsername(username: string): string {
+	return path.join('0', `${PERSONAL_DISK_PREFIX}${username}`);
+}
+
+export type MediaPathUser = { id: string; username: string; role: UserRole; approved: boolean };
+
+/** Virtual root in DB (username); legacy rows used `0/<username>`. */
+export function virtualRootForFolder(folder: { path: string; user: { username: string } }): string {
+	if (!folder.path.includes('/')) return folder.path;
+	return folder.user.username;
+}
+
+let personalFolderMigration: Promise<void> | null = null;
+
+/**
+ * Move legacy personal dirs (`<drive>/<username>`) to hidden locations and
+ * update PersonalFolder.path to the virtual username-only form.
+ */
+export async function ensurePersonalFolderMigration(): Promise<void> {
+	if (!personalFolderMigration) {
+		personalFolderMigration = runPersonalFolderMigration().catch((err) => {
+			personalFolderMigration = null;
+			throw err;
+		});
+	}
+	return personalFolderMigration;
+}
+
+async function runPersonalFolderMigration(): Promise<void> {
+	const roots = getMediaRoots();
+	if (roots.length === 0) return;
+
+	const legacy = await db.personalFolder.findMany({
+		where: { path: { contains: '/' } },
+		include: { user: { select: { username: true } } }
+	});
+
+	for (const row of legacy) {
+		const parts = row.path.split('/').filter(Boolean);
+		if (parts.length !== 2) continue;
+
+		const [idxStr, oldSegment] = parts;
+		if (!idxStr || !/^\d+$/.test(idxStr) || !oldSegment) continue;
+
+		const idx = parseInt(idxStr, 10);
+		if (Number.isNaN(idx) || idx < 0 || idx >= roots.length) continue;
+
+		const oldFull = path.join(path.resolve(roots[idx]!), oldSegment);
+		const newRel = physicalRelativePathForUsername(row.user.username);
+		const newResolved = resolveSafePath(newRel);
+		if (!newResolved) continue;
+
+		try {
+			await fs.access(oldFull);
+		} catch {
+			try {
+				await fs.access(newResolved.fullPath);
+				await db.personalFolder.update({
+					where: { id: row.id },
+					data: { path: row.user.username }
+				});
+			} catch {
+				// nothing on disk
+			}
+			continue;
+		}
+
+		try {
+			await fs.mkdir(path.dirname(newResolved.fullPath), { recursive: true });
+			await fs.rename(oldFull, newResolved.fullPath);
+		} catch (err) {
+			console.warn('[personal-folder-migrate] rename failed', row.id, err);
+			continue;
+		}
+
+		await db.personalFolder.update({
+			where: { id: row.id },
+			data: { path: row.user.username }
+		});
+	}
+}
+
+/**
+ * Resolve a client media path to disk. Supports virtual personal paths
+ * (`<username>/…`) mapped to `0/.personal_<username>/…`.
+ */
+export async function resolveMediaPath(
+	relativePath: string,
+	user: MediaPathUser | null
+): Promise<{ fullPath: string; root: string } | null> {
+	await ensurePersonalFolderMigration();
+
+	const cleaned = path.normalize(relativePath.replace(/^[/\\]+/, ''));
+	if (!cleaned) return null;
+
+	const folders = await db.personalFolder.findMany({
+		include: { user: { select: { username: true } } }
+	});
+
+	for (const folder of folders) {
+		const virtualRoot = virtualRootForFolder(folder);
+		const isUnder =
+			cleaned === virtualRoot ||
+			cleaned === `${virtualRoot}/` ||
+			cleaned.startsWith(`${virtualRoot}/`);
+		if (!isUnder) continue;
+
+		const isOwner = user && folder.userId === user.id;
+		const isAdmin = user?.role === 'ADMIN';
+		if (!user || (!isOwner && !isAdmin)) {
+			continue;
+		}
+
+		const rest =
+			cleaned === virtualRoot || cleaned === `${virtualRoot}/`
+				? ''
+				: cleaned.slice(virtualRoot.length + 1);
+		const physicalRel =
+			rest.length > 0
+				? path.join(physicalRelativePathForUsername(folder.user.username), rest)
+				: physicalRelativePathForUsername(folder.user.username);
+
+		return resolveSafePath(physicalRel);
+	}
+
+	return resolveSafePath(relativePath);
+}
+
+export async function resolveMediaPathForUserId(
+	relativePath: string,
+	userId: string
+): Promise<{ fullPath: string; root: string } | null> {
+	const row = await db.user.findUnique({
+		where: { id: userId },
+		select: { id: true, username: true, role: true, approved: true }
+	});
+	if (!row) return resolveSafePath(relativePath);
+	return resolveMediaPath(relativePath, {
+		id: row.id,
+		username: row.username,
+		role: row.role,
+		approved: row.approved
+	});
+}
+
+/** Add the signed-in user's personal folder as a virtual root entry. */
+export async function appendPersonalRootEntry(
+	entries: MediaEntry[],
+	viewer: MediaPathUser
+): Promise<MediaEntry[]> {
+	const mine = await db.personalFolder.findUnique({
+		where: { userId: viewer.id },
+		include: { user: { select: { username: true } } }
+	});
+	if (!mine) return entries;
+
+	const virtualRoot = virtualRootForFolder(mine);
+	const physicalRel = physicalRelativePathForUsername(mine.user.username);
+	const resolved = resolveSafePath(physicalRel);
+	if (!resolved) return entries;
+
+	try {
+		const stat = await fs.stat(resolved.fullPath);
+		const personalEntry: MediaEntry = {
+			name: mine.user.username,
+			path: virtualRoot,
+			fullPath: resolved.fullPath,
+			type: 'directory',
+			modified: stat.mtime.toISOString()
+		};
+		const withoutDup = entries.filter((e) => e.path !== personalEntry.path);
+		return [...withoutDup, personalEntry].sort((a, b) => {
+			if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+			return a.name.localeCompare(b.name);
+		});
+	} catch {
+		return entries;
+	}
+}
+
 export function getMediaInfo(filename: string) {
 	const ext = path.extname(filename).slice(1).toLowerCase();
 	return (
@@ -156,9 +342,16 @@ export type ClientMediaEntry = Omit<MediaEntry, 'fullPath'> & {
 	children?: ClientMediaEntry[];
 };
 
-export async function listDirectory(relativePath: string): Promise<MediaEntry[]> {
+export async function listDirectory(
+	relativePath: string,
+	viewer?: MediaPathUser | null
+): Promise<MediaEntry[]> {
 	const roots = getMediaRoots();
 	if (roots.length === 0) throw new Error('No media roots configured');
+
+	if (viewer) {
+		await ensurePersonalFolderMigration();
+	}
 
 	// Root-level: merge all roots into one virtual directory
 	if (!relativePath || relativePath === '/') {
@@ -177,10 +370,15 @@ export async function listDirectory(relativePath: string): Promise<MediaEntry[]>
 				// Drive not available — skip silently
 			}
 		}
+		if (viewer) {
+			return appendPersonalRootEntry(entries, viewer);
+		}
 		return entries;
 	}
 
-	const resolved = resolveSafePath(relativePath);
+	const resolved = viewer
+		? await resolveMediaPath(relativePath, viewer)
+		: resolveSafePath(relativePath);
 	if (!resolved) throw new Error('Invalid path');
 
 	const dirents = await fs.readdir(resolved.fullPath, { withFileTypes: true });
@@ -225,8 +423,11 @@ export async function listDirectory(relativePath: string): Promise<MediaEntry[]>
 	});
 }
 
-export async function listDirectoryTree(relativePath: string): Promise<ClientMediaEntry[]> {
-	const entries = await listDirectory(relativePath);
+export async function listDirectoryTree(
+	relativePath: string,
+	viewer?: MediaPathUser | null
+): Promise<ClientMediaEntry[]> {
+	const entries = await listDirectory(relativePath, viewer);
 
 	return await Promise.all(
 		entries.map(async (entry) => {
@@ -234,7 +435,7 @@ export async function listDirectoryTree(relativePath: string): Promise<ClientMed
 			if (entry.type === 'directory') {
 				return {
 					...safeEntry,
-					children: await listDirectoryTree(entry.path)
+					children: await listDirectoryTree(entry.path, viewer)
 				};
 			}
 

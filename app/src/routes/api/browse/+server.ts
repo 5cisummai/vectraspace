@@ -6,7 +6,7 @@ import type { RequestHandler } from './$types';
 export const GET: RequestHandler = async ({ locals }) => {
 	const user = await requireAuth(locals);
 	try {
-		const entries = await listDirectoryTree('');
+		const entries = await listDirectoryTree('', user);
 		const filtered = await filterPersonalEntries(user, entries);
 		return json(filtered);
 	} catch (err) {

@@ -1,7 +1,7 @@
 import { json, error } from '@sveltejs/kit';
 import fs from 'node:fs/promises';
 import { requireAuth, requirePathAccess } from '$lib/server/api';
-import { resolveSafePath } from '$lib/server/services/storage';
+import { resolveMediaPath } from '$lib/server/services/storage';
 import { recordAction, FsOperation } from '$lib/server/fs-history';
 import type { RequestHandler } from './$types';
 
@@ -12,7 +12,7 @@ export const POST: RequestHandler = async ({ params, locals, request }) => {
 
 	await requirePathAccess(user, relativePath);
 
-	const resolved = resolveSafePath(relativePath);
+	const resolved = await resolveMediaPath(relativePath, user);
 	if (!resolved) throw error(400, 'Invalid path');
 
 	try {

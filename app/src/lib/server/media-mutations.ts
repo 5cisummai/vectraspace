@@ -3,7 +3,11 @@ import { randomUUID } from 'node:crypto';
 import * as path from '$lib/server/paths';
 import { db } from '$lib/server/db';
 import { deleteSemanticEntryByRelativePath } from '$lib/server/semantic';
-import { resolveSafePath } from '$lib/server/services/storage';
+import {
+	getMediaRoots,
+	resolveMediaPath,
+	type MediaPathUser
+} from '$lib/server/services/storage';
 import { moveToTrash } from '$lib/server/trash';
 import { recordAction, FsOperation } from '$lib/server/fs-history';
 
@@ -15,6 +19,26 @@ export interface MutationUserContext {
 export interface HistoryContext {
 	userId: string;
 	workspaceId?: string | null;
+}
+
+async function viewerForMutation(ctx: MutationUserContext): Promise<MediaPathUser> {
+	const u = await db.user.findUnique({
+		where: { id: ctx.userId },
+		select: { id: true, username: true, role: true, approved: true }
+	});
+	if (!u) {
+		throw new Error('User not found');
+	}
+	return { id: u.id, username: u.username, role: u.role, approved: u.approved };
+}
+
+async function mediaRootIndexForPath(rel: string, viewer: MediaPathUser): Promise<number | null> {
+	const resolved = await resolveMediaPath(rel, viewer);
+	if (!resolved) return null;
+	const roots = getMediaRoots();
+	const resolvedRoot = path.resolve(resolved.root);
+	const idx = roots.findIndex((r) => path.resolve(r) === resolvedRoot);
+	return idx >= 0 ? idx : null;
 }
 
 async function collectNestedRelativePaths(
@@ -39,9 +63,10 @@ async function collectNestedRelativePaths(
 async function canDeletePath(
 	relativePath: string,
 	stat: { isFile(): boolean; isDirectory(): boolean },
-	ctx: MutationUserContext
+	ctx: MutationUserContext,
+	viewer: MediaPathUser
 ): Promise<string | null> {
-	const resolved = resolveSafePath(relativePath);
+	const resolved = await resolveMediaPath(relativePath, viewer);
 	if (!resolved) return 'Invalid path.';
 
 	if (path.resolve(resolved.fullPath) === path.resolve(resolved.root)) {
@@ -73,7 +98,8 @@ export async function deleteMediaPath(
 	ctx: MutationUserContext,
 	historyCtx?: HistoryContext
 ): Promise<string> {
-	const resolved = resolveSafePath(relativePath);
+	const viewer = await viewerForMutation(ctx);
+	const resolved = await resolveMediaPath(relativePath, viewer);
 	if (!resolved) return `Error: invalid or out-of-scope path "${relativePath}".`;
 
 	let stat: Awaited<ReturnType<typeof fs.stat>>;
@@ -86,7 +112,7 @@ export async function deleteMediaPath(
 		throw err;
 	}
 
-	const deny = await canDeletePath(relativePath, stat, ctx);
+	const deny = await canDeletePath(relativePath, stat, ctx, viewer);
 	if (deny) return `Error: ${deny}`;
 
 	const semanticPaths = await collectNestedRelativePaths(resolved.fullPath, relativePath);
@@ -137,25 +163,20 @@ export async function deleteMediaPath(
 	return `Deleted successfully: ${relativePath}`;
 }
 
-function parseRootIndex(rel: string): number | null {
-	const first = rel.split(path.sep)[0];
-	if (!first || !/^\d+$/.test(first)) return null;
-	return parseInt(first, 10);
-}
-
 export async function moveMediaPath(
 	source: string,
 	destination: string,
 	ctx: MutationUserContext,
 	historyCtx?: HistoryContext
 ): Promise<string> {
-	const srcRes = resolveSafePath(source);
-	const dstRes = resolveSafePath(destination);
+	const viewer = await viewerForMutation(ctx);
+	const srcRes = await resolveMediaPath(source, viewer);
+	const dstRes = await resolveMediaPath(destination, viewer);
 	if (!srcRes) return `Error: invalid source path "${source}".`;
 	if (!dstRes) return `Error: invalid destination path "${destination}".`;
 
-	const srcRootIdx = parseRootIndex(source);
-	const dstRootIdx = parseRootIndex(destination);
+	const srcRootIdx = await mediaRootIndexForPath(source, viewer);
+	const dstRootIdx = await mediaRootIndexForPath(destination, viewer);
 	if (srcRootIdx === null || dstRootIdx === null || srcRootIdx !== dstRootIdx) {
 		return 'Error: move only supports paths within the same media root.';
 	}
@@ -170,7 +191,7 @@ export async function moveMediaPath(
 		throw err;
 	}
 
-	const deny = await canDeletePath(source, stat, ctx);
+	const deny = await canDeletePath(source, stat, ctx, viewer);
 	if (deny) return `Error: ${deny}`;
 
 	try {
@@ -248,7 +269,8 @@ export async function moveManyMediaPaths(
 		return 'Error: move requires at least one non-empty source path.';
 	}
 
-	const dstDirResolved = resolveSafePath(destinationDirectory);
+	const viewer = await viewerForMutation(ctx);
+	const dstDirResolved = await resolveMediaPath(destinationDirectory, viewer);
 	if (!dstDirResolved) {
 		return `Error: invalid destination directory path "${destinationDirectory}".`;
 	}
@@ -265,13 +287,13 @@ export async function moveManyMediaPaths(
 		throw err;
 	}
 
-	const dstRootIdx = parseRootIndex(destinationDirectory);
+	const dstRootIdx = await mediaRootIndexForPath(destinationDirectory, viewer);
 	if (dstRootIdx === null) {
 		return `Error: invalid destination root in "${destinationDirectory}".`;
 	}
 
 	for (const source of normalizedSources) {
-		const srcRootIdx = parseRootIndex(source);
+		const srcRootIdx = await mediaRootIndexForPath(source, viewer);
 		if (srcRootIdx === null || srcRootIdx !== dstRootIdx) {
 			return 'Error: move only supports moving paths within the same media root.';
 		}
@@ -307,13 +329,14 @@ export async function copyMediaPath(
 	ctx: MutationUserContext,
 	historyCtx?: HistoryContext
 ): Promise<string> {
-	const srcRes = resolveSafePath(source);
-	const dstRes = resolveSafePath(destination);
+	const viewer = await viewerForMutation(ctx);
+	const srcRes = await resolveMediaPath(source, viewer);
+	const dstRes = await resolveMediaPath(destination, viewer);
 	if (!srcRes) return `Error: invalid source path "${source}".`;
 	if (!dstRes) return `Error: invalid destination path "${destination}".`;
 
-	const srcRootIdx = parseRootIndex(source);
-	const dstRootIdx = parseRootIndex(destination);
+	const srcRootIdx = await mediaRootIndexForPath(source, viewer);
+	const dstRootIdx = await mediaRootIndexForPath(destination, viewer);
 	if (srcRootIdx === null || dstRootIdx === null || srcRootIdx !== dstRootIdx) {
 		return 'Error: copy_file only supports paths within the same media root.';
 	}
@@ -385,7 +408,18 @@ export async function mkdirMediaPath(
 ): Promise<string> {
 	if (!relativePath.trim()) return 'Error: path is required.';
 
-	const resolved = resolveSafePath(relativePath);
+	let viewer: MediaPathUser | null = null;
+	if (historyCtx?.userId) {
+		const u = await db.user.findUnique({
+			where: { id: historyCtx.userId },
+			select: { id: true, username: true, role: true, approved: true }
+		});
+		if (u) {
+			viewer = { id: u.id, username: u.username, role: u.role, approved: u.approved };
+		}
+	}
+
+	const resolved = await resolveMediaPath(relativePath, viewer);
 	if (!resolved) return `Error: invalid or out-of-scope path "${relativePath}".`;
 
 	try {

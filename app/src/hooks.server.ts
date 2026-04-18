@@ -1,5 +1,6 @@
 import { verifyJwt } from '$lib/server/auth';
 import { db } from '$lib/server/db';
+import { ensurePersonalFolderMigration } from '$lib/server/services/storage';
 import type { Handle } from '@sveltejs/kit';
 import type { UserRole } from '@prisma/client';
 
@@ -39,6 +40,10 @@ const PUBLIC_PATHS = [
 ];
 
 export const handle: Handle = async ({ event, resolve }) => {
+	await ensurePersonalFolderMigration().catch((err) => {
+		console.error('[personal-folder-migrate]', err);
+	});
+
 	const path = event.url.pathname;
 
 	// Extract Bearer token from Authorization header (set by handleFetch on client)
