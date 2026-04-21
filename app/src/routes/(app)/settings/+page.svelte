@@ -5,13 +5,14 @@
 	import * as Table from '$lib/components/ui/table/index.js';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
-	import { Card } from '$lib/components/ui/card';
+	import * as Card from '$lib/components/ui/card/index.js';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import * as Progress from '$lib/components/ui/progress/index.js';
 	import { apiFetch } from '$lib/api-fetch';
 	import * as Select from '$lib/components/ui/select/index.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import { toast } from 'svelte-sonner';
+	import PageShell from '$lib/components/page-shell.svelte';
 	import FolderIcon from '@lucide/svelte/icons/folder';
 	import UsersIcon from '@lucide/svelte/icons/users';
 	import InfoIcon from '@lucide/svelte/icons/info';
@@ -19,8 +20,8 @@
 	import AlertCircleIcon from '@lucide/svelte/icons/alert-circle';
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import XIcon from '@lucide/svelte/icons/x';
-	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import FolderInputIcon from '@lucide/svelte/icons/folder-input';
+	import WorkspaceSemanticReindex from '$lib/components/workspace-semantic-reindex.svelte';
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
 	import {
 		AUTO_APPROVE_SETTINGS,
@@ -60,8 +61,7 @@
 		deactivateTargetId = userId;
 		deactivateDialogOpen = true;
 	}
-	let reindexing = $state(false);
-	let reindexStatus = $state<'idle' | 'success' | 'error'>('idle');
+	let semanticReindexBusy = $state(false);
 
 	let ingestingRoot = $state<number | null>(null);
 	let ingestStatus = $state<'idle' | 'success' | 'error'>('idle');
@@ -166,26 +166,6 @@
 		return true;
 	}
 
-	async function reindex() {
-		reindexing = true;
-		reindexStatus = 'idle';
-		try {
-			const res = await apiFetch('/api/search/reindex', { method: 'POST' });
-			if (res.ok) {
-				const data = await res.json();
-				reindexStatus = 'success';
-				console.log('Reindex completed:', data);
-			} else {
-				reindexStatus = 'error';
-			}
-		} catch (e) {
-			console.error('Failed to reindex', e);
-			reindexStatus = 'error';
-		} finally {
-			reindexing = false;
-		}
-	}
-
 	async function ingestDirectory(rootIndex: number) {
 		ingestingRoot = rootIndex;
 		ingestStatus = 'idle';
@@ -235,18 +215,13 @@
 	});
 </script>
 
-<div class="min-h-full bg-background p-4 text-foreground sm:p-6">
-	<main class="mx-auto flex w-full max-w-360 flex-col gap-8">
-		<section class="flex flex-col gap-2">
-			<p class="text-xs font-medium tracking-[0.14em] text-muted-foreground uppercase">Settings</p>
-			<h1 class="text-2xl font-semibold">Settings</h1>
-			<p class="max-w-2xl text-sm text-muted-foreground">
-				Manage your account settings and preferences.
-			</p>
-		</section>
-
-		<Tabs.Root bind:value={settingsTab}>
-			<Tabs.List class="grid w-full max-w-2xl grid-cols-2 gap-1 sm:grid-cols-4">
+<PageShell
+	eyebrow="Configuration"
+	title="Settings"
+	description="Manage your account settings and preferences."
+>
+	<Tabs.Root bind:value={settingsTab}>
+		<Tabs.List class="grid w-full max-w-2xl grid-cols-2 gap-1 sm:grid-cols-4">
 				<Tabs.Trigger value="storage" class="gap-2">
 					<FolderIcon class="size-4" />
 					Storage
@@ -271,7 +246,7 @@
 				{:else}
 					<div class="space-y-4">
 						{#each drives as drive}
-							<Card class="p-4">
+							<Card.Root class="card-glass"><Card.Content class="p-4">
 								<div class="mb-2 flex items-center justify-between">
 									<div class="flex items-center gap-2">
 										<HardDriveIcon class="size-5 text-muted-foreground" />
@@ -294,12 +269,12 @@
 								{:else if !drive.available}
 									<p class="text-sm text-muted-foreground">Drive is not accessible.</p>
 								{/if}
-							</Card>
+							</Card.Content></Card.Root>
 						{/each}
 					</div>
 				{/if}
 
-				<Card class="bg-muted/50 p-4">
+				<Card.Root class="card-glass bg-muted/30"><Card.Content class="p-4">
 					<h3 class="mb-2 text-sm font-medium">Adding More Drives</h3>
 					<p class="text-sm text-muted-foreground">
 						To add more storage drives, edit the <code class="rounded bg-muted px-1 text-xs"
@@ -311,30 +286,26 @@
 					<code class="mt-2 block rounded bg-muted p-2 text-xs"
 						>MEDIA_ROOTS=/path/to/drive1,/path/to/drive2</code
 					>
-				</Card>
+				</Card.Content></Card.Root>
 
-				<Card class="p-4">
+				<Card.Root class="card-glass"><Card.Content class="p-4">
 					<h3 class="mb-2 text-sm font-medium">Search &amp; AI chat indexing</h3>
 					<p class="mb-3 text-sm text-muted-foreground">
-						<strong class="font-medium text-foreground">Reindex</strong> refreshes the filename and
-						metadata vector index for search.
+						<strong class="font-medium text-foreground">Semantic index</strong> powers Smart Search and
+						the assistant’s file search for the <strong class="font-medium text-foreground"
+							>workspace selected in the header</strong
+						>. Rebuilding it rescans files into that workspace’s vector index.
 						<strong class="font-medium text-foreground">Ingest</strong> reads text and PDFs and stores
-						chunks for the chat assistant (separate from reindex).
+						chunks for chat context (separate from semantic search).
 					</p>
 					{#if isAdmin}
-						<div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-							<Button onclick={reindex} disabled={reindexing || ingestingRoot !== null}>
-								<RefreshCwIcon class="size-4 {reindexing ? 'animate-spin' : ''}" />
-								{reindexing ? 'Reindexing...' : 'Reindex search'}
-							</Button>
-						</div>
-						{#if reindexStatus === 'success'}
-							<p class="mt-2 text-sm text-green-600">Reindex completed successfully.</p>
-						{:else if reindexStatus === 'error'}
-							<p class="mt-2 text-sm text-destructive">
-								Reindex failed. Try again or check server logs.
-							</p>
-						{/if}
+						<WorkspaceSemanticReindex
+							{isAdmin}
+							density="comfortable"
+							onBusyChange={(busy) => {
+								semanticReindexBusy = busy;
+							}}
+						/>
 
 						<div class="mt-4 border-t border-border pt-4">
 							<p class="mb-2 text-sm font-medium">Ingest file contents</p>
@@ -347,7 +318,7 @@
 										<Button
 											variant="outline"
 											onclick={() => ingestDirectory(drive.index)}
-											disabled={reindexing || ingestingRoot !== null}
+											disabled={semanticReindexBusy || ingestingRoot !== null}
 										>
 											<FolderInputIcon
 												class="size-4 {ingestingRoot === drive.index ? 'animate-pulse' : ''}"
@@ -368,11 +339,11 @@
 							Only administrators can reindex or ingest content for search and chat.
 						</p>
 					{/if}
-				</Card>
+				</Card.Content></Card.Root>
 			</Tabs.Content>
 
 			<Tabs.Content value="assistant" class="space-y-4">
-				<Card class="p-4">
+				<Card.Root class="card-glass"><Card.Content class="p-4">
 					<h3 class="mb-1 text-sm font-medium">AI assistant — file actions</h3>
 					<p class="mb-4 text-sm text-muted-foreground">
 						When the chat assistant wants to change files (delete, move, copy, or create folders),
@@ -402,11 +373,11 @@
 							</li>
 						{/each}
 					</ul>
-				</Card>
+				</Card.Content></Card.Root>
 			</Tabs.Content>
 
 			<Tabs.Content value="users" class="space-y-4">
-				<Card class="space-y-2 p-4">
+				<Card.Root class="card-glass"><Card.Content class="space-y-4 p-4">
 					<h3 class="text-sm font-medium">Server accounts vs workspace members</h3>
 					<p class="text-sm text-muted-foreground">
 						<strong class="font-medium text-foreground">Users (this tab)</strong> are login accounts for
@@ -421,7 +392,7 @@
 							workspace</em> (Admin, Member, Viewer). Someone can be a server user without being in a
 						workspace, or belong to several workspaces with different roles.
 					</p>
-				</Card>
+				</Card.Content></Card.Root>
 
 				{#if isAdmin}
 					<div class="rounded-md border">
@@ -523,7 +494,7 @@
 						<div class="space-y-3">
 							<h3 class="text-sm font-medium">Pending signups</h3>
 							{#each pendingUsers as pending}
-								<Card class="flex items-center justify-between p-4">
+								<Card.Root class="card-glass"><Card.Content class="flex items-center justify-between p-4">
 									<div>
 										<p class="font-medium">{pending.displayName}</p>
 										<p class="text-sm text-muted-foreground">@{pending.username}</p>
@@ -548,7 +519,7 @@
 											Reject
 										</Button>
 									</div>
-								</Card>
+								</Card.Content></Card.Root>
 							{/each}
 						</div>
 					{/if}
@@ -564,19 +535,18 @@
 			</Tabs.Content>
 
 			<Tabs.Content value="info" class="space-y-4">
-				<Card class="p-4">
+				<Card.Root class="card-glass"><Card.Content class="p-4">
 					<h3 class="mb-2 text-sm font-medium">Version</h3>
 					<p class="text-sm text-muted-foreground">Vectraspace Media Server v0.1.0</p>
-				</Card>
+				</Card.Content></Card.Root>
 
-				<Card class="p-4">
+				<Card.Root class="card-glass"><Card.Content class="p-4">
 					<h3 class="mb-2 text-sm font-medium">Legal</h3>
 					<p class="text-sm text-muted-foreground">
 						This software is provided as-is for personal use. Use at your own risk. Ensure you have
 						proper backups of your media files.
 					</p>
-				</Card>
+				</Card.Content></Card.Root>
 			</Tabs.Content>
 		</Tabs.Root>
-	</main>
-</div>
+</PageShell>

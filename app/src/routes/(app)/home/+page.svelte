@@ -28,6 +28,7 @@
 	import type { FileEntry } from '$lib/components/file-browser/file-grid.svelte';
 	import FilePreviewTile from '$lib/components/file-browser/file-preview-tile.svelte';
 	import ChatComposer from '$lib/components/chat-llm/chat-composer.svelte';
+	import PageShell from '$lib/components/page-shell.svelte';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -197,18 +198,10 @@
 	}
 </script>
 
-<div class="min-h-full min-w-0 bg-background text-foreground">
-	<main class="mx-auto flex w-full max-w-6xl min-w-0 flex-col gap-10 px-4 py-8 sm:px-6 lg:px-8">
+<PageShell eyebrow="Command Center" title={greeting() + (username ? `, ${username}` : '')} description="Your agentic workspace hub." containerClass="max-w-none">
 
-		<!-- ① Command Header ─────────────────────────────────────────────────── -->
+		<!-- ① Command Composer ─────────────────────────────────────────────────── -->
 		<section class="flex w-full flex-col items-center gap-4">
-			<div class="flex flex-col items-center gap-0.5 text-center">
-				<p class="text-xs text-muted-foreground">
-					{greeting()}{username ? `, ${username}` : ''}
-				</p>
-				<h1 class="text-2xl font-semibold tracking-tight">Command Center</h1>
-			</div>
-
 			<div class="w-full max-w-2xl">
 				<ChatComposer
 					bind:value={composerValue}
@@ -244,9 +237,7 @@
 		<!-- ② Active Intelligence Row ────────────────────────────────────────── -->
 		<section class="flex w-full min-w-0 flex-col gap-3">
 			<div class="flex min-w-0 items-center justify-between gap-2">
-				<h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-					What's Happening
-				</h2>
+				<h2 class="section-label">What's Happening</h2>
 				<Button variant="ghost" size="sm" class="gap-1.5 text-xs" onclick={openNewAgent}>
 					<PlusIcon class="size-3.5" />
 					New agent
@@ -255,12 +246,12 @@
 
 			{#if agents.length === 0}
 				<div
-					class="flex items-center gap-4 rounded-xl border border-dashed px-4 py-3.5"
+					class="card-glass flex items-center gap-4 rounded-xl border-dashed px-4 py-4"
 				>
 					<div
-						class="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted"
+						class="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10"
 					>
-						<BotIcon class="size-4 text-muted-foreground" />
+						<BotIcon class="size-4 text-primary/70" />
 					</div>
 					<div>
 						<p class="text-sm font-medium">No active agents</p>
@@ -280,7 +271,7 @@
 						{@const isDone = !isActive && agent.status === 'done'}
 						<a
 							href="/chat?agent={encodeURIComponent(agent.id)}"
-							class="flex w-52 shrink-0 snap-start flex-col gap-2.5 rounded-xl border bg-card p-3.5 transition-all hover:border-primary/30 hover:shadow-sm"
+							class="card-glass card-glass-hover flex w-52 shrink-0 snap-start flex-col gap-2.5 rounded-xl p-3.5 transition-all"
 						>
 							<div class="flex items-start justify-between gap-2">
 								<p
@@ -355,9 +346,7 @@
 			<!-- Continue Working (recent files) ── 2/3 width -->
 			<section class="flex min-w-0 flex-col gap-4 lg:col-span-2">
 				<div class="flex min-w-0 items-center justify-between gap-2">
-					<h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-						Continue Working
-					</h2>
+					<h2 class="section-label">Continue Working</h2>
 					<Button
 						variant="ghost"
 						size="sm"
@@ -370,7 +359,7 @@
 				</div>
 
 				{#if !hasAnyContent}
-					<Card.Root class="border-dashed">
+					<Card.Root class="card-glass border-dashed">
 						<Card.Content class="flex flex-col items-center gap-3 py-8 text-center">
 							<div class="flex size-9 items-center justify-center rounded-full bg-muted">
 								<FilesIcon class="size-4 text-muted-foreground" />
@@ -388,9 +377,9 @@
 						<!-- Visual files: images + videos — grid of square tiles -->
 						{#if visualFiles.length > 0}
 							<div class="flex flex-col gap-2">
-								<h3 class="text-xs font-medium text-muted-foreground">Media</h3>
+								<h3 class="section-label">Media</h3>
 								<div
-									class="grid grid-cols-4 gap-2 sm:grid-cols-5 lg:grid-cols-4 xl:grid-cols-5"
+									class="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5"
 								>
 									{#each visualFiles as entry (entry.path)}
 										<button
@@ -416,7 +405,7 @@
 						<!-- Document files — compact list rows -->
 						{#if docFiles.length > 0}
 							<div class="flex flex-col gap-2">
-								<h3 class="text-xs font-medium text-muted-foreground">Documents</h3>
+								<h3 class="section-label">Documents</h3>
 								<div
 									class="flex flex-col divide-y divide-border overflow-hidden rounded-xl border"
 								>
@@ -451,9 +440,7 @@
 			<!-- Pinned Folders ── 1/3 width -->
 			<section class="flex min-w-0 flex-col gap-3">
 				<div class="flex min-w-0 items-center justify-between gap-2">
-					<h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-						Pinned
-					</h2>
+					<h2 class="section-label">Pinned</h2>
 					{#if topLevelDirs.length > 0}
 						<Button
 							variant="ghost"
@@ -469,7 +456,7 @@
 
 				<!-- Folder picker -->
 				{#if showFolderPicker}
-					<Card.Root class="border-primary/20">
+					<Card.Root class="card-glass border-primary/20">
 						<Card.Content class="p-1.5">
 							<p class="px-2 pb-1 pt-0.5 text-xs text-muted-foreground">
 								Select a folder to pin:
@@ -497,9 +484,9 @@
 
 				{#if pinnedFolders.items.length === 0}
 					<div
-						class="flex flex-col items-center gap-2 rounded-xl border border-dashed p-5 text-center"
+						class="card-glass flex flex-col items-center gap-2 rounded-xl border-dashed p-5 text-center"
 					>
-						<PinIcon class="size-5 text-muted-foreground/40" />
+						<PinIcon class="size-5 text-primary/40" />
 						<p class="text-xs text-muted-foreground">
 							Pin folders for quick access.<br />Click "Pin folder" above to start.
 						</p>
@@ -551,13 +538,11 @@
 			<section class="flex w-full min-w-0 flex-col gap-3">
 				<div class="flex items-center gap-2">
 					<HardDriveIcon class="size-3.5 text-muted-foreground" />
-					<h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-						Storage
-					</h2>
+					<h2 class="section-label">Storage</h2>
 				</div>
 				<div class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
 					{#each drives as drive (drive.index)}
-						<Card.Root class="overflow-hidden">
+						<Card.Root class="card-glass overflow-hidden">
 							<Card.Content class="p-4">
 								<div class="mb-3 flex items-center justify-between gap-2">
 									<div class="flex min-w-0 items-center gap-2">
@@ -598,5 +583,4 @@
 			</section>
 		{/if}
 
-	</main>
-</div>
+</PageShell>

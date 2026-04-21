@@ -272,7 +272,7 @@
 					<Sheet.Content
 						side="left"
 						showCloseButton={false}
-						class="h-full max-w-none gap-0 border-r border-border/60 bg-muted/20 p-0 data-[side=left]:w-[min(22rem,calc(100vw-1rem))]"
+						class="h-full max-w-none gap-0 border-r border-border/60 bg-card/50 backdrop-blur-md p-0 data-[side=left]:w-[min(22rem,calc(100vw-1rem))]"
 					>
 						<div class="flex h-full min-h-0 flex-col">
 							{@render agentsPanel()}
@@ -281,7 +281,7 @@
 				</Sheet.Root>
 			{:else}
 				<Sidebar.Root
-					class="flex h-full min-h-0 w-72 shrink-0 border-r border-border/60 bg-muted/20"
+					class="flex h-full min-h-0 w-72 shrink-0 border-r border-border/60 bg-card/50 backdrop-blur-md"
 					collapsible="none"
 				>
 					{@render agentsPanel()}

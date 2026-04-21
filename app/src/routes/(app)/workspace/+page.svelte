@@ -10,6 +10,7 @@
 	import * as Select from '$lib/components/ui/select/index.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import { toast } from 'svelte-sonner';
+	import PageShell from '$lib/components/page-shell.svelte';
 	import UserIcon from '@lucide/svelte/icons/user';
 	import ShieldIcon from '@lucide/svelte/icons/shield';
 	import TrashIcon from '@lucide/svelte/icons/trash';
@@ -102,12 +103,15 @@
 	}
 </script>
 
-<div class="container mx-auto max-w-3xl space-y-6 p-6">
-	<h1 class="text-2xl font-bold">Workspace Settings</h1>
+<PageShell
+	eyebrow="Workspace"
+	title="Workspace Settings"
+	description="Manage members, details, and permissions for the active workspace."
+>
 
 	{#if workspace}
 		<!-- Details Card -->
-		<Card.Root>
+		<Card.Root class="card-glass">
 			<Card.Header>
 				<Card.Title>Details</Card.Title>
 				<Card.Description>Workspace name and description</Card.Description>
@@ -138,7 +142,7 @@
 		</Card.Root>
 
 		<!-- Members Card -->
-		<Card.Root>
+		<Card.Root class="card-glass">
 			<Card.Header>
 				<Card.Title>Members ({workspace.members.length})</Card.Title>
 				<Card.Description>Manage who has access to this workspace</Card.Description>
@@ -191,7 +195,7 @@
 
 		<!-- Danger Zone -->
 		{#if isAdmin && workspace.slug !== 'default'}
-			<Card.Root class="border-destructive/50">
+			<Card.Root class="card-glass border-destructive/40">
 				<Card.Header>
 					<Card.Title class="text-destructive">Danger Zone</Card.Title>
 					<Card.Description>Irreversible actions</Card.Description>
@@ -219,10 +223,10 @@
 			</Card.Root>
 		{/if}
 	{:else}
-		<Card.Root>
+		<Card.Root class="card-glass">
 			<Card.Content class="p-6 text-center text-muted-foreground">
 				No workspace selected. Select a workspace from the sidebar.
 			</Card.Content>
 		</Card.Root>
 	{/if}
-</div>
+</PageShell>

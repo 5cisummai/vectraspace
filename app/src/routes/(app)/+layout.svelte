@@ -2,6 +2,7 @@
 	import type { Snippet } from 'svelte';
 	import AppTopbar from '$lib/components/app-topbar.svelte';
 	import AppSidebar from '$lib/components/app-sidebar.svelte';
+	import CommandPalette from '$lib/components/command-palette.svelte';
 	import { Separator } from '$lib/components/ui/separator/index.js';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 	import { agentSessions } from '$lib/hooks/agent-sessions.svelte';
@@ -50,3 +51,5 @@
 		</div>
 	</Sidebar.Provider>
 </div>
+
+<CommandPalette />

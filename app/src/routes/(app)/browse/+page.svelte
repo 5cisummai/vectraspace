@@ -75,7 +75,7 @@
 	}
 </script>
 
-<div class="h-screen w-full bg-background text-foreground">
+<div class="flex h-full w-full flex-col bg-background text-foreground">
 	<FileBrowser
 		fileTree={browserTree}
 		{folderContents}
