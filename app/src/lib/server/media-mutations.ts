@@ -122,22 +122,10 @@ export async function deleteMediaPath(
 
 	const semanticPaths = await collectNestedRelativePaths(resolved.fullPath, relativePath);
 
-	// Record action before mutation so we have the action ID for the trash key
-	let trashKey: string | undefined;
-	if (historyCtx) {
-		// Pre-generate a stable trash key so we can create the action and move to trash atomically
-		trashKey = randomUUID();
-	}
+	const trashKey = randomUUID();
 
 	try {
-		if (historyCtx && trashKey) {
-			// Move to trash instead of permanent delete
-			await moveToTrash(resolved.fullPath, trashKey);
-		} else if (stat.isDirectory()) {
-			await fs.rm(resolved.fullPath, { recursive: true });
-		} else {
-			await fs.unlink(resolved.fullPath);
-		}
+		await moveToTrash(resolved.fullPath, trashKey);
 	} catch (err) {
 		if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
 			return `Error: path not found "${relativePath}".`;
@@ -155,7 +143,7 @@ export async function deleteMediaPath(
 		semanticPaths.map((p) => deleteSemanticEntryByRelativePath(p).catch(() => undefined))
 	);
 
-	if (historyCtx && trashKey) {
+	if (historyCtx) {
 		await recordAction({
 			userId: historyCtx.userId,
 			workspaceId: historyCtx.workspaceId,

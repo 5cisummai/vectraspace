@@ -121,6 +121,22 @@
 		dispatch('refresh');
 	}
 
+	/** Right-clicked tile: use all selected if this tile is part of a multi-select; otherwise the tile alone. */
+	function contextMenuTargets(clicked: FlatEntry): FlatEntry[] {
+		if (selectedPaths.length > 1 && selectedPaths.includes(clicked.path)) {
+			const inSelection = new Set(selectedPaths);
+			return items.filter((i) => inSelection.has(i.path));
+		}
+		return [clicked];
+	}
+
+	function onTileContextMenuOpen(clicked: FlatEntry, open: boolean) {
+		if (!open) return;
+		if (!selectedPaths.includes(clicked.path)) {
+			setSelection([clicked.path]);
+		}
+	}
+
 	function setSelection(paths: string[]) {
 		dispatch('highlight', { paths });
 	}
@@ -211,12 +227,14 @@
 		clearSelection();
 	}
 
-	async function copyPath(path: string) {
+	async function copyPathsForTargets(clicked: FlatEntry) {
+		const paths = contextMenuTargets(clicked).map((e) => e.path);
+		if (paths.length === 0) return;
 		try {
-			await navigator.clipboard.writeText(path);
-			toast('Path copied');
+			await navigator.clipboard.writeText(paths.join('\n'));
+			toast(paths.length === 1 ? 'Path copied' : `${paths.length} paths copied`);
 		} catch {
-			toast.error('Could not copy', { description: path });
+			toast.error('Could not copy', { description: paths.join('\n') });
 		}
 	}
 
@@ -283,43 +301,135 @@
 	let deleteDialogOpen = $state(false);
 	let deleteSubmitting = $state(false);
 	let deleteError = $state<string | null>(null);
-	let pendingDeleteEntry = $state<FlatEntry | null>(null);
+	let pendingDeleteEntries = $state<FlatEntry[]>([]);
 
-	function requestDelete(entry: FlatEntry) {
-		pendingDeleteEntry = entry;
+	function fileAndFolderCounts(entries: FlatEntry[]) {
+		let files = 0;
+		let dirs = 0;
+		for (const e of entries) {
+			if (e.type === 'directory') dirs += 1;
+			else files += 1;
+		}
+		return { files, dirs };
+	}
+
+	function formatFileFolderPhrase(
+		files: number,
+		dirs: number,
+		join: 'comma' | 'and'
+	): string {
+		if (files > 0 && dirs === 0) {
+			return `${files} file${files === 1 ? '' : 's'}`;
+		}
+		if (dirs > 0 && files === 0) {
+			return `${dirs} folder${dirs === 1 ? '' : 's'}`;
+		}
+		if (files > 0 && dirs > 0) {
+			const f = `${files} file${files === 1 ? '' : 's'}`;
+			const d = `${dirs} folder${dirs === 1 ? '' : 's'}`;
+			return join === 'and' ? `${f} and ${d}` : `${f}, ${d}`;
+		}
+		return '0 items';
+	}
+
+	function deleteMenuLabel(targets: FlatEntry[]): string {
+		const n = targets.length;
+		if (n === 0) return 'Delete';
+		if (n === 1) {
+			return targets[0].type === 'directory' ? 'Delete folder' : 'Delete file';
+		}
+		const { files, dirs } = fileAndFolderCounts(targets);
+		return `Delete ${formatFileFolderPhrase(files, dirs, 'comma')}`;
+	}
+
+	function deletedToastDescription(entries: FlatEntry[]): string {
+		if (entries.length === 1) return entries[0].name;
+		const { files, dirs } = fileAndFolderCounts(entries);
+		return formatFileFolderPhrase(files, dirs, 'and');
+	}
+
+	/** @returns `null` on success, or an error message to display. */
+	async function performDeleteEntries(entries: FlatEntry[]): Promise<string | null> {
+		if (entries.length === 0) return null;
+		const deleteHeaders: Record<string, string> = {};
+		if (workspaceStore.activeId) deleteHeaders['X-Workspace-Id'] = workspaceStore.activeId;
+		for (const entry of entries) {
+			const res = await apiFetch(`/api/delete/${encodeMediaPath(entry.path)}`, {
+				method: 'DELETE',
+				headers: deleteHeaders
+			});
+			if (!res.ok) {
+				return await readErrorMessage(res);
+			}
+		}
+		toast.success('Moved to Trash', { description: deletedToastDescription(entries) });
+		fsHistory.refresh();
+		notifyRefresh();
+		return null;
+	}
+
+	async function requestDelete(clicked: FlatEntry) {
+		const entries = contextMenuTargets(clicked);
+		const { dirs } = fileAndFolderCounts(entries);
+		if (dirs === 0) {
+			const err = await performDeleteEntries(entries);
+			if (err) {
+				toast.error('Could not delete', { description: err });
+			}
+			return;
+		}
+		pendingDeleteEntries = entries;
 		deleteError = null;
 		deleteDialogOpen = true;
 	}
 
 	async function confirmDelete() {
-		if (!pendingDeleteEntry) return;
+		if (pendingDeleteEntries.length === 0) return;
 
 		deleteSubmitting = true;
 		deleteError = null;
 		try {
-			const deleteHeaders: Record<string, string> = {};
-			if (workspaceStore.activeId) deleteHeaders['X-Workspace-Id'] = workspaceStore.activeId;
-			const res = await apiFetch(`/api/delete/${encodeMediaPath(pendingDeleteEntry.path)}`, {
-				method: 'DELETE',
-				headers: deleteHeaders
-			});
-			if (!res.ok) {
-				deleteError = await readErrorMessage(res);
+			const err = await performDeleteEntries(pendingDeleteEntries);
+			if (err) {
+				deleteError = err;
 				return;
 			}
-
-			const deletedName = pendingDeleteEntry.name;
 			deleteDialogOpen = false;
-			pendingDeleteEntry = null;
-			toast.success('Deleted', {
-				description: deletedName
-			});
-			fsHistory.refresh();
-			notifyRefresh();
+			pendingDeleteEntries = [];
 		} finally {
 			deleteSubmitting = false;
 		}
 	}
+
+	const deleteDialogTitle = $derived.by(() => {
+		const list = pendingDeleteEntries;
+		const n = list.length;
+		if (n === 0) return 'Delete';
+		if (n === 1) {
+			return list[0].type === 'directory' ? 'Delete folder' : 'Delete file';
+		}
+		const { files, dirs } = fileAndFolderCounts(list);
+		return `Delete ${formatFileFolderPhrase(files, dirs, 'comma')}`;
+	});
+
+	const deleteDialogDescription = $derived.by(() => {
+		const list = pendingDeleteEntries;
+		const n = list.length;
+		const undoHint = ' You can restore with Undo (Ctrl+Z) or open Trash from the sidebar.';
+		if (n === 0) return `Items are moved to the Trash folder on disk.${undoHint}`;
+		if (n === 1) {
+			return list[0].type === 'directory'
+				? `Move folder \`${list[0].name}\` and its contents to Trash?${undoHint}`
+				: `Move \`${list[0].name}\` to Trash?${undoHint}`;
+		}
+		const { files, dirs } = fileAndFolderCounts(list);
+		const hasDirs = dirs > 0;
+		return `This will move ${formatFileFolderPhrase(
+			files,
+			dirs,
+			'and'
+		)} to Trash.${hasDirs ? ' Selected folders and everything inside them are included.' : ''}${undoHint}`;
+	});
 
 	let fileInput: HTMLInputElement | undefined = $state();
 	/** Bound to the grid background context menu so we can close it after opening the file picker. */
@@ -443,9 +553,9 @@
 <Dialog.Root bind:open={deleteDialogOpen}>
 	<Dialog.Content showCloseButton={!deleteSubmitting}>
 		<Dialog.Header>
-			<Dialog.Title>Delete item</Dialog.Title>
+			<Dialog.Title>{deleteDialogTitle}</Dialog.Title>
 			<Dialog.Description>
-				Delete `{pendingDeleteEntry?.name ?? 'this item'}`? This action cannot be undone.
+				{deleteDialogDescription}
 			</Dialog.Description>
 		</Dialog.Header>
 
@@ -501,8 +611,9 @@
 						{#snippet item({ index, style })}
 							{@const item = items[index]}
 							{#if item}
+								{@const targets = contextMenuTargets(item)}
 								<div role="presentation" class="box-border min-h-0 min-w-0 p-0.5" {style}>
-									<ContextMenu.Root>
+									<ContextMenu.Root onOpenChange={(open) => onTileContextMenuOpen(item, open)}>
 										<ContextMenu.Trigger class="block h-full min-h-0 w-full">
 											<Button
 												type="button"
@@ -529,15 +640,22 @@
 												/>
 											</Button>
 										</ContextMenu.Trigger>
-										<ContextMenu.Content class="w-48">
-											<ContextMenu.Item onclick={() => activateEntry(item)}>Open</ContextMenu.Item>
-											<ContextMenu.Item onclick={renameNotSupported}>Rename</ContextMenu.Item>
-											<ContextMenu.Item onclick={() => copyPath(item.path)}
-												>Copy path</ContextMenu.Item
+										<ContextMenu.Content class="w-56">
+											{#if targets.length === 1}
+												<ContextMenu.Item onclick={() => activateEntry(targets[0])}
+													>Open</ContextMenu.Item
+												>
+												<ContextMenu.Item onclick={renameNotSupported}>Rename</ContextMenu.Item>
+											{/if}
+											<ContextMenu.Item onclick={() => copyPathsForTargets(item)}
+												>{targets.length === 1 ? 'Copy path' : `Copy ${targets.length} paths`}</ContextMenu.Item
 											>
 											<ContextMenu.Separator />
-											<ContextMenu.Item variant="destructive" onclick={() => requestDelete(item)}>
-												Delete
+											<ContextMenu.Item
+												variant="destructive"
+												onclick={() => requestDelete(item)}
+											>
+												{deleteMenuLabel(targets)}
 											</ContextMenu.Item>
 										</ContextMenu.Content>
 									</ContextMenu.Root>

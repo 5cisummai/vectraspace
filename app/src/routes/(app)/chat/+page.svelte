@@ -217,7 +217,19 @@
 				cleanUrl.searchParams.delete('q');
 				window.history.replaceState(null, '', cleanUrl.pathname + cleanUrl.search);
 			} else if (agentId) {
-				await panel.loadConversationFromServer(agentId);
+				const agentExists = agents.some((agent) => agent.id === agentId);
+				if (!agentExists) {
+					const cleanUrl = new URL(window.location.href);
+					cleanUrl.searchParams.delete('agent');
+					window.history.replaceState(null, '', cleanUrl.pathname + cleanUrl.search);
+					if (agents.length > 0) {
+						await panel.loadConversationFromServer(agents[0].id);
+					} else {
+						panel.resetConversation();
+					}
+				} else {
+					await panel.loadConversationFromServer(agentId);
+				}
 			} else if (agents.length > 0) {
 				await panel.loadConversationFromServer(agents[0].id);
 			}

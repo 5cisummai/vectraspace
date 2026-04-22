@@ -209,7 +209,12 @@
 					pendingId: data.pendingId as string,
 					tool: data.tool as string,
 					args: (data.args ?? {}) as Record<string, unknown>,
-					chatId: (data.chatId ?? activeChatId ?? '') as string
+					chatId:
+						typeof data.chatId === 'string'
+							? data.chatId
+							: typeof activeChatId === 'string'
+								? activeChatId
+								: undefined
 				};
 				break;
 			}
@@ -420,7 +425,7 @@
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					chatId: activeChatId,
+					chatId: activeChatId ?? undefined,
 					question: options.question,
 					filters: { limit: 16 },
 					regenerate: options.regenerate === true,

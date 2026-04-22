@@ -65,7 +65,7 @@ export const AUTO_APPROVE_SETTINGS: Array<{
 	{
 		id: 'delete_file',
 		label: 'Delete',
-		description: 'Permanently delete files or folders.'
+		description: 'Move files or folders to Trash (.trash on the media root).'
 	},
 	{
 		id: 'move',

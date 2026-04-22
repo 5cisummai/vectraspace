@@ -433,7 +433,7 @@ export async function listDirectory(
 	if (!resolved) throw new Error('Invalid path');
 
 	const dirents = (await fs.readdir(resolved.fullPath, { withFileTypes: true })).filter(
-		(d) => !d.name.startsWith('.')
+		(d) => !d.name.startsWith('.') || d.name === '.trash'
 	);
 
 	const stats = await Promise.all(

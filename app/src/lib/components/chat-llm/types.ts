@@ -54,5 +54,5 @@ export interface PendingToolConfirmation {
 	pendingId: string;
 	tool: string;
 	args: Record<string, unknown>;
-	chatId: string;
+	chatId?: string;
 }
