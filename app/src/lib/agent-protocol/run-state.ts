@@ -1,4 +1,8 @@
-import type { Source, ToolCallSummary } from '$lib/components/chat-llm/types';
+import type {
+	PendingToolConfirmation,
+	Source,
+	ToolCallSummary
+} from '$lib/components/chat-llm/types';
 import type { AgentSseEvent } from './events';
 import { toolLabelForName } from './tool-metadata';
 
@@ -27,12 +31,7 @@ export type AgentRunStreamState = {
 	pendingThinking: string;
 	toolSteps: ToolActionStep[];
 	error: string | null;
-	pendingToolConfirmation: {
-		pendingId: string;
-		tool: string;
-		args: Record<string, unknown>;
-		chatId?: string;
-	} | null;
+	pendingToolConfirmation: PendingToolConfirmation | null;
 	finalizedAssistant: StreamAssistantMeta | null;
 };
 

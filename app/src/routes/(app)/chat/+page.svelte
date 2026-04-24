@@ -18,6 +18,7 @@
 		CHAT_AGENTS_SIDEBAR_COOKIE,
 		SIDEBAR_COOKIE_MAX_AGE
 	} from '$lib/components/ui/sidebar/constants.js';
+	import { agentSessions } from '$lib/hooks/agent-sessions.svelte';
 	import { IsMobile } from '$lib/hooks/is-mobile.svelte.js';
 	import { workspaceStore } from '$lib/hooks/workspace.svelte';
 	import { dedupeChatsById } from '$lib/utils.js';
@@ -29,6 +30,12 @@
 	interface AgentSummary {
 		id: string;
 		title: string;
+		userId: string;
+		createdBy?: {
+			userId: string;
+			username: string;
+			displayName: string;
+		};
 		createdAt: string;
 		updatedAt: string;
 		messageCount: number;
@@ -38,6 +45,8 @@
 	let { data }: { data: PageData } = $props();
 
 	const workspaceId = $derived(workspaceStore.activeId);
+	const currentUserId = $derived(data.user?.id ?? null);
+	const currentWorkspaceRole = $derived(workspaceStore.active?.role ?? null);
 
 	let agents = $state<AgentSummary[]>([]);
 	let activeAgentId = $state<string | null>(null);
@@ -72,6 +81,7 @@
 			}
 			const payload = (await response.json()) as { chats?: AgentSummary[] };
 			agents = dedupeChatsById(Array.isArray(payload.chats) ? payload.chats : []);
+			agentSessions.seedFromChats(agents);
 			if (preferredAgentId) {
 				activeAgentId = preferredAgentId;
 			}
@@ -107,6 +117,10 @@
 
 	async function confirmDeleteChat() {
 		if (!deleteTarget) return;
+		if (!canDeleteChat(deleteTarget)) {
+			deleteError = 'You can only delete chats you created unless you are a workspace admin.';
+			return;
+		}
 		const ws = workspaceStore.activeId;
 		if (!ws) {
 			deleteError = 'No workspace selected';
@@ -152,6 +166,16 @@
 		if (diff < hour) return `${Math.max(1, Math.floor(diff / minute))}m ago`;
 		if (diff < day) return `${Math.floor(diff / hour)}h ago`;
 		return `${Math.floor(diff / day)}d ago`;
+	}
+
+	function canDeleteChat(agent: AgentSummary): boolean {
+		return currentWorkspaceRole === 'ADMIN' || agent.userId === currentUserId;
+	}
+
+	function creatorLabel(agent: AgentSummary): string | null {
+		if (!agent.createdBy) return null;
+		if (agent.createdBy.userId === currentUserId) return null;
+		return agent.createdBy.displayName || agent.createdBy.username;
 	}
 
 	// Keep ?agent= in the URL in sync with the active chat — silent replaceState, no reload.
@@ -272,7 +296,9 @@
 									name={agent.title}
 									description="{agent.messageCount} message{agent.messageCount === 1
 										? ''
-										: 's'} · {relativeTimestamp(agent.updatedAt)}"
+										: 's'} · {relativeTimestamp(agent.updatedAt)}{creatorLabel(agent)
+										? ` · by ${creatorLabel(agent)}`
+										: ''}"
 									sessionStatus={agent.id === activeAgentId ? activeAgentStatus : agent.status}
 									variant={agent.id === activeAgentId ? 'outline' : 'default'}
 									size="xs"
@@ -288,7 +314,11 @@
 									Open
 								</ContextMenu.Item>
 								<ContextMenu.Separator />
-								<ContextMenu.Item variant="destructive" onclick={() => openDeleteChatDialog(agent)}>
+								<ContextMenu.Item
+									variant="destructive"
+									disabled={!canDeleteChat(agent)}
+									onclick={() => openDeleteChatDialog(agent)}
+								>
 									<Trash2Icon />
 									Delete chat
 								</ContextMenu.Item>
@@ -336,6 +366,7 @@
 		<div class="flex h-full min-h-0 min-w-0 flex-1 flex-col">
 			<ChatLlm
 				{workspaceId}
+				{currentUserId}
 				bind:this={agentPanel}
 				bind:activeChatId={activeAgentId}
 				bind:activeAgentStatus

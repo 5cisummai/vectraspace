@@ -1,8 +1,5 @@
 // ---------------------------------------------------------------------------
-// agent/transport/stream.ts — Legacy SSE (no v2 envelope on each `data:`)
-//
-// Used when `USE_AGENT_V2=false` in the environment. Default path is
-// `$lib/server/agent-v2/transport-sse.ts` (versioned payloads + `AgentV2StreamEvent` rows).
+// V2 transport — @openai/agents streaming with versioned SSE + DB replay rows
 // ---------------------------------------------------------------------------
 
 import { run, RunState } from '@openai/agents';
@@ -14,7 +11,7 @@ import type {
 	RunRawModelStreamEvent
 } from '@openai/agents';
 import { env } from '$env/dynamic/private';
-import { getMediaAgent } from '../agent';
+import { getMediaAgent } from '$lib/server/agent/agent';
 import { createPendingConfirmation } from '$lib/server/pending-tool-confirmation';
 import { saveAssistantMessage } from '$lib/server/chat-store';
 import {
@@ -25,140 +22,177 @@ import {
 	supersedeOtherRunsForChat,
 	emitRunStep
 } from '$lib/server/agent-runs';
-import type { AgentAppContext } from '../context';
-import type { AgentRequest } from '../types';
-import { MAX_AGENT_ITERATIONS } from '../types';
-import { messagesToAgentInputItems } from '../memory/history';
-import { normalizeFilters } from '../filters';
-import { errorMessage } from '../errors';
-import { getAgentModel } from '../provider';
-
-// ---------------------------------------------------------------------------
-// SSE helpers
-// ---------------------------------------------------------------------------
+import type { AgentAppContext } from '$lib/server/agent/context';
+import type { AgentRequest } from '$lib/server/agent/types';
+import { MAX_AGENT_ITERATIONS } from '$lib/server/agent/types';
+import { messagesToAgentInputItems } from '$lib/server/agent/memory/history';
+import { normalizeFilters } from '$lib/server/agent/filters';
+import { errorMessage } from '$lib/server/agent/errors';
+import { getAgentModel } from '$lib/server/agent/provider';
+import { newEventId, createRunEventSequencer, persistV2SseEvent } from './run-events';
 
 function sseEvent(event: string, data: unknown): string {
 	return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
-// ---------------------------------------------------------------------------
-// Stream an agent run as SSE events
-// ---------------------------------------------------------------------------
-
-export interface StreamRunOpts {
+export type StreamRunOptsV2 = {
 	chatId: string;
 	kind: 'ask' | 'confirm';
 	savedUserMessageId?: string | null;
-}
+	/** Effective workspace (resolved; may be default when workspaces are disabled) */
+	workspaceId: string;
+};
 
-/**
- * Execute the agent and stream SSE events to the client.
- * Returns a Response with Content-Type: text/event-stream.
- */
-export function createStreamingResponse(
-	request: AgentRequest,
-	appCtx: AgentAppContext,
-	opts: StreamRunOpts
-): Response {
-	const encoder = new TextEncoder();
-
-	const body = new ReadableStream<Uint8Array>({
-		async start(controller) {
-			const write = (event: string, data: unknown) => {
-				try {
-					controller.enqueue(encoder.encode(sseEvent(event, data)));
-				} catch {
-					// controller closed
-				}
-			};
-
-			try {
-				await executeStreamingRun(request, appCtx, opts, write);
-			} catch (err) {
-				write('error', { message: errorMessage(err) });
-			} finally {
-				write('done', {});
-				try {
-					controller.close();
-				} catch {
-					// already closed
-				}
-			}
-		}
-	});
-
-	return new Response(body, {
-		headers: {
-			'Content-Type': 'text/event-stream',
-			'Cache-Control': 'no-cache',
-			Connection: 'keep-alive',
-			'X-Accel-Buffering': 'no'
-		}
-	});
-}
-
-/**
- * Resume a paused run (after tool approval/denial) and stream SSE events.
- */
-export function createConfirmStreamingResponse(
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	runState: RunState<any, any>,
-	appCtx: AgentAppContext,
-	opts: StreamRunOpts
-): Response {
-	const encoder = new TextEncoder();
-
-	const body = new ReadableStream<Uint8Array>({
-		async start(controller) {
-			const write = (event: string, data: unknown) => {
-				try {
-					controller.enqueue(encoder.encode(sseEvent(event, data)));
-				} catch {
-					// controller closed
-				}
-			};
-
-			try {
-				await executeConfirmStreamingRun(runState, appCtx, opts, write);
-			} catch (err) {
-				write('error', { message: errorMessage(err) });
-			} finally {
-				write('done', {});
-				try {
-					controller.close();
-				} catch {
-					// already closed
-				}
-			}
-		}
-	});
-
-	return new Response(body, {
-		headers: {
-			'Content-Type': 'text/event-stream',
-			'Cache-Control': 'no-cache',
-			Connection: 'keep-alive',
-			'X-Accel-Buffering': 'no'
-		}
-	});
-}
-
-// ---------------------------------------------------------------------------
-// Core streaming execution
-// ---------------------------------------------------------------------------
+type BaseWriter = (event: string, data: unknown) => void;
 
 type SSEWriter = (event: string, data: unknown) => void;
 
-async function executeStreamingRun(
+function wrapSseV2(
+	base: BaseWriter,
+	runId: string,
+	workspaceId: string,
+	nextSeq: () => number
+): SSEWriter {
+	return (event, data) => {
+		const body = (typeof data === 'object' && data !== null && !Array.isArray(data) ? data : {}) as
+			| Record<string, unknown>
+			| { message: string };
+		const sequence = nextSeq();
+		const payload: Record<string, unknown> = {
+			v: 2,
+			sequence,
+			eventId: newEventId(),
+			runId,
+			workspaceId,
+			timestamp: new Date().toISOString(),
+			...body
+		};
+		persistV2SseEvent(runId, event, payload);
+		base(event, payload);
+	};
+}
+
+/**
+ * Optional workspace id in opts for collaboration fan-out (server uses appCtx.workspaceId in tools).
+ * Envelope `workspaceId` is always opts.workspaceId.
+ */
+export function createV2StreamingResponse(
 	request: AgentRequest,
 	appCtx: AgentAppContext,
-	opts: StreamRunOpts,
-	write: SSEWriter
+	opts: StreamRunOptsV2
+): Response {
+	const encoder = new TextEncoder();
+
+	const body = new ReadableStream<Uint8Array>({
+		async start(controller) {
+			const baseWrite: BaseWriter = (event, data) => {
+				try {
+					controller.enqueue(encoder.encode(sseEvent(event, data)));
+				} catch {
+					// closed
+				}
+			};
+
+			const nextSeq = createRunEventSequencer();
+			let w: BaseWriter = baseWrite;
+
+			try {
+				await executeV2Run(request, appCtx, opts, (ev, d) => w(ev, d), (rid) => {
+					w = wrapSseV2(baseWrite, rid, opts.workspaceId, nextSeq) as BaseWriter;
+				});
+			} catch (err) {
+				w('error', { message: errorMessage(err) } as object);
+			} finally {
+				w('done', {} as object);
+				try {
+					controller.close();
+				} catch {
+					// already closed
+				}
+			}
+		}
+	});
+
+	return new Response(body, {
+		headers: {
+			'Content-Type': 'text/event-stream',
+			'Cache-Control': 'no-cache',
+			Connection: 'keep-alive',
+			'X-Accel-Buffering': 'no',
+			'X-Agent-Transport': 'v2'
+		}
+	});
+}
+
+export function createV2ConfirmStreamingResponse(
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	runState: RunState<any, any>,
+	appCtx: AgentAppContext,
+	opts: StreamRunOptsV2
+): Response {
+	const encoder = new TextEncoder();
+
+	const body = new ReadableStream<Uint8Array>({
+		async start(controller) {
+			const baseWrite: BaseWriter = (event, data) => {
+				try {
+					controller.enqueue(encoder.encode(sseEvent(event, data)));
+				} catch {
+					// closed
+				}
+			};
+
+			const nextSeq = createRunEventSequencer();
+			let w: BaseWriter = baseWrite;
+
+			try {
+				await executeV2Confirm(
+					runState,
+					appCtx,
+					opts,
+					(ev, d) => w(ev, d),
+					(rid) => {
+						w = wrapSseV2(baseWrite, rid, opts.workspaceId, nextSeq) as BaseWriter;
+					}
+				);
+			} catch (err) {
+				w('error', { message: errorMessage(err) } as object);
+			} finally {
+				w('done', {} as object);
+				try {
+					controller.close();
+				} catch {
+					// already closed
+				}
+			}
+		}
+	});
+
+	return new Response(body, {
+		headers: {
+			'Content-Type': 'text/event-stream',
+			'Cache-Control': 'no-cache',
+			Connection: 'keep-alive',
+			'X-Accel-Buffering': 'no',
+			'X-Agent-Transport': 'v2'
+		}
+	});
+}
+
+// ---------------------------------------------------------------------------
+// execute (mirrors stream.ts; write is plain until runId is set)
+// ---------------------------------------------------------------------------
+
+async function executeV2Run(
+	request: AgentRequest,
+	appCtx: AgentAppContext,
+	opts: StreamRunOptsV2,
+	write: SSEWriter,
+	setRunId: (id: string) => void
 ): Promise<void> {
 	const filters = normalizeFilters(request.filters);
 	appCtx.filters = filters;
 
-	// Build input: history + new question
 	const historyItems = messagesToAgentInputItems(request.history);
 	const input: AgentInputItem[] = [
 		...historyItems,
@@ -166,26 +200,22 @@ async function executeStreamingRun(
 	];
 
 	const agent = getMediaAgent();
-
-	// Create DB run record for sidebar status
 	const agentRun = await createAgentRun(appCtx.userId, opts.chatId, opts.kind, appCtx.workspaceId);
 	if (opts.kind === 'confirm') {
 		await supersedeOtherRunsForChat(opts.chatId, agentRun.id);
 	}
 	await markRunRunning(agentRun.id);
+	setRunId(agentRun.id);
 
-	// Emit the run/chat IDs so the client can track
+	const model = env.LLM_MODEL ?? getAgentModel();
 	write('run_started', {
 		runId: agentRun.id,
 		chatId: opts.chatId,
+		model,
 		...(opts.savedUserMessageId ? { userMessageId: opts.savedUserMessageId } : {})
 	});
 
-	appCtx.logger.info('stream_run.start', {
-		chatId: opts.chatId,
-		maxTurns: MAX_AGENT_ITERATIONS,
-		historyItems: historyItems.length
-	});
+	appCtx.logger.info('stream_run.v2.start', { chatId: opts.chatId, runId: agentRun.id });
 
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	let stream: StreamedRunResult<AgentAppContext, any>;
@@ -201,23 +231,25 @@ async function executeStreamingRun(
 		throw err;
 	}
 
-	await processStreamEvents(stream, appCtx, opts, write, agentRun.id);
+	await processV2StreamEvents(stream, appCtx, opts, write, agentRun.id, model);
 }
 
-async function executeConfirmStreamingRun(
+async function executeV2Confirm(
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	runState: RunState<any, any>,
 	appCtx: AgentAppContext,
-	opts: StreamRunOpts,
-	write: SSEWriter
+	opts: StreamRunOptsV2,
+	write: SSEWriter,
+	setRunId: (id: string) => void
 ): Promise<void> {
 	const agent = getMediaAgent();
-
+	const model = env.LLM_MODEL ?? getAgentModel();
 	const agentRun = await createAgentRun(appCtx.userId, opts.chatId, 'confirm', appCtx.workspaceId);
 	await supersedeOtherRunsForChat(opts.chatId, agentRun.id);
 	await markRunRunning(agentRun.id);
+	setRunId(agentRun.id);
 
-	write('run_started', { runId: agentRun.id, chatId: opts.chatId });
+	write('run_started', { runId: agentRun.id, chatId: opts.chatId, model });
 
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	let stream: StreamedRunResult<AgentAppContext, any>;
@@ -233,41 +265,29 @@ async function executeConfirmStreamingRun(
 		throw err;
 	}
 
-	await processStreamEvents(stream, appCtx, opts, write, agentRun.id);
+	await processV2StreamEvents(stream, appCtx, opts, write, agentRun.id, model);
 }
 
-// ---------------------------------------------------------------------------
-// Process SDK stream events and map to SSE events for the client
-// ---------------------------------------------------------------------------
-
-async function processStreamEvents(
+async function processV2StreamEvents(
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	stream: StreamedRunResult<AgentAppContext, any>,
 	appCtx: AgentAppContext,
-	opts: StreamRunOpts,
+	opts: StreamRunOptsV2,
 	write: SSEWriter,
-	runId: string
+	runId: string,
+	model: string
 ): Promise<void> {
 	let accumulatedText = '';
-	const model = env.LLM_MODEL ?? getAgentModel();
-
 	try {
 		for await (const event of stream) {
-			handleStreamEvent(event, appCtx, opts, write, runId);
-
-			// Accumulate text from raw model events
+			mapRawStreamEvent(event, appCtx, opts, write, runId);
 			if (event.type === 'raw_model_stream_event') {
 				const delta = extractTextDelta(event);
-				if (delta) {
-					accumulatedText += delta;
-				}
+				if (delta) accumulatedText += delta;
 			}
 		}
-
-		// Wait for the stream to fully complete
 		await stream.completed;
 
-		// Check for interruptions (tool approval requests)
 		if (stream.interruptions && stream.interruptions.length > 0) {
 			const interruption = stream.interruptions[0];
 			const toolName = interruption.name ?? 'unknown_tool';
@@ -280,7 +300,7 @@ async function processStreamEvents(
 					toolArgs = JSON.parse(interruption.rawItem.arguments) as Record<string, unknown>;
 				}
 			} catch {
-				// ignore parse errors
+				// ignore
 			}
 
 			const runStateStr = stream.state.toString();
@@ -297,10 +317,7 @@ async function processStreamEvents(
 				chatId: opts.chatId,
 				requestedByUserId: appCtx.userId
 			});
-
-			// Partial text before confirmation — don't save as message yet
-			appCtx.logger.info('stream_run.pending_confirmation', { pendingId, tool: toolName });
-			// Mark run as awaiting confirmation (for sidebar)
+			appCtx.logger.info('stream_run.v2.pending', { runId, pendingId, tool: toolName });
 			const { markRunAwaitingConfirmation } = await import('$lib/server/agent-runs');
 			await markRunAwaitingConfirmation(runId, {
 				pendingId,
@@ -311,7 +328,6 @@ async function processStreamEvents(
 			return;
 		}
 
-		// Run completed — extract final output
 		const finalText =
 			(typeof stream.finalOutput === 'string' ? stream.finalOutput : null) ??
 			(accumulatedText || null);
@@ -323,7 +339,6 @@ async function processStreamEvents(
 			stream.newItems.filter((i) => i.type === 'tool_call_item' || i.type === 'message_output_item')
 				.length || 1;
 
-		// Save assistant message to DB
 		const msgId = await saveAssistantMessage(
 			opts.chatId,
 			answer,
@@ -336,7 +351,6 @@ async function processStreamEvents(
 			appCtx.workspaceId
 		);
 
-		// Emit final metadata
 		write('meta', {
 			chatId: opts.chatId,
 			sources: appCtx.sourceTracker.toArray(),
@@ -347,51 +361,44 @@ async function processStreamEvents(
 		});
 
 		await markRunDone(runId);
-		appCtx.logger.info('stream_run.complete', {
-			iterations,
-			toolCallCount: appCtx.toolCalls.length
-		});
+		appCtx.logger.info('stream_run.v2.complete', { runId, iterations });
 	} catch (err) {
 		await markRunFailed(runId, errorMessage(err));
 		throw err;
 	}
 }
 
-function handleStreamEvent(
+function mapRawStreamEvent(
 	event: RunStreamEvent,
 	appCtx: AgentAppContext,
-	opts: StreamRunOpts,
+	opts: StreamRunOptsV2,
 	write: SSEWriter,
 	runId: string
 ): void {
 	switch (event.type) {
 		case 'raw_model_stream_event': {
 			const delta = extractTextDelta(event);
-			if (delta) {
-				write('text_delta', { delta });
-			}
+			if (delta) write('text_delta', { delta } as object);
 			break;
 		}
 		case 'run_item_stream_event': {
-			handleRunItemEvent(event, appCtx, opts, write, runId);
+			mapRunItemEvent(event, appCtx, opts, write, runId);
 			break;
 		}
 		case 'agent_updated_stream_event': {
-			// Could emit agent handoff info, but single-agent for now
 			break;
 		}
 	}
 }
 
-function handleRunItemEvent(
+function mapRunItemEvent(
 	event: RunItemStreamEvent,
 	appCtx: AgentAppContext,
-	opts: StreamRunOpts,
+	opts: StreamRunOptsV2,
 	write: SSEWriter,
 	runId: string
 ): void {
 	const { name, item } = event;
-
 	switch (name) {
 		case 'tool_called': {
 			const toolName = 'name' in item.rawItem ? String(item.rawItem.name ?? '') : 'unknown';
@@ -403,7 +410,7 @@ function handleRunItemEvent(
 			} catch {
 				// ignore
 			}
-			write('tool_start', { tool: toolName, args: toolArgs });
+			write('tool_start', { tool: toolName, args: toolArgs } as object);
 			emitRunStep(appCtx.workspaceId ?? null, opts.chatId, runId, {
 				type: 'tool_call',
 				tool: toolName,
@@ -420,7 +427,7 @@ function handleRunItemEvent(
 						? item.rawItem.output.slice(0, 220) + '...'
 						: item.rawItem.output;
 			}
-			write('tool_done', { tool: toolName, result: resultText });
+			write('tool_done', { tool: toolName, result: resultText } as object);
 			emitRunStep(appCtx.workspaceId ?? null, opts.chatId, runId, {
 				type: 'tool_result',
 				tool: toolName,
@@ -429,7 +436,6 @@ function handleRunItemEvent(
 			break;
 		}
 		case 'reasoning_item_created': {
-			// Extract reasoning text if available
 			let reasoningText = '';
 			if ('rawItem' in item && item.rawItem) {
 				const raw = item.rawItem as Record<string, unknown>;
@@ -442,17 +448,13 @@ function handleRunItemEvent(
 						.join('\n');
 				}
 			}
-			if (reasoningText) {
-				write('reasoning', { text: reasoningText });
-			}
+			if (reasoningText) write('reasoning', { text: reasoningText } as object);
 			break;
 		}
 		case 'tool_approval_requested': {
-			// Handled after stream completes via stream.interruptions
 			break;
 		}
 		case 'message_output_created': {
-			// The final message — text is already streamed via raw_model_stream_event
 			break;
 		}
 		default:
@@ -460,38 +462,24 @@ function handleRunItemEvent(
 	}
 }
 
-/**
- * Extract text delta from a raw model stream event.
- * Works with both responses API and chat_completions API event shapes.
- */
 function extractTextDelta(event: RunRawModelStreamEvent): string | null {
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	const data = event.data as any;
 	if (!data || typeof data !== 'object') return null;
-
-	// Responses API: { type: 'response.output_text.delta', delta: '...' }
 	if (data.type === 'response.output_text.delta' && typeof data.delta === 'string') {
 		return data.delta;
 	}
-
-	// SDK output_text_delta event
 	if (data.type === 'output_text_delta' && typeof data.delta === 'string') {
 		return data.delta;
 	}
-
-	// Chat Completions API (ChatCompletionChunk shape):
-	// { choices: [{ delta: { content: '...' } }] }
 	if (Array.isArray(data.choices)) {
 		const choice = data.choices[0];
 		if (choice?.delta?.content && typeof choice.delta.content === 'string') {
 			return choice.delta.content;
 		}
 	}
-
-	// Generic fallback: if data has a delta field with string content
 	if (typeof data.delta === 'string') {
 		return data.delta;
 	}
-
 	return null;
 }

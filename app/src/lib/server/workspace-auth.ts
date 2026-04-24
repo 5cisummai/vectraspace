@@ -1,5 +1,6 @@
 import { error } from '@sveltejs/kit';
 import { requireMembership } from '$lib/server/services/workspace';
+import { resolveAgentWorkspaceForUser } from '$lib/server/agent-v2/workspace-context';
 import type { WorkspaceRole } from '@prisma/client';
 
 export type { WorkspaceRole };
@@ -57,4 +58,28 @@ export async function requireOptionalWorkspaceAccess(
 	const role = await getOptionalWorkspaceRole(workspaceId, userId, minRole);
 	if (!role) throw error(403, denialMessage);
 	return workspaceId;
+}
+
+/**
+ * Resolves the effective workspace (default when workspaces are disabled) then
+ * enforces membership. Use for agent/chat routes that must work with ENABLE_WORKSPACES=false.
+ */
+export async function requireAgentRouteWorkspace(
+	event: { locals: App.Locals; params: Record<string, string> },
+	minRole: WorkspaceRole
+): Promise<{
+	workspaceId: string;
+	userId: string;
+	role: WorkspaceRole;
+	workspaceMode: 'explicit' | 'default';
+}> {
+	const user = event.locals.user;
+	if (!user) throw error(401, 'Unauthorized');
+
+	const pathId = event.params.workspaceId;
+	if (!pathId) throw error(400, 'workspaceId is required');
+
+	const { workspaceId, mode } = await resolveAgentWorkspaceForUser(user.id, pathId);
+	const role = await requireMembership(workspaceId, user.id, minRole);
+	return { workspaceId, userId: user.id, role, workspaceMode: mode };
 }

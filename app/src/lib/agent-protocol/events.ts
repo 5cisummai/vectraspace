@@ -98,7 +98,9 @@ export function parseAgentSseEvent(eventName: string, payload: unknown): AgentSs
 					pendingId,
 					tool,
 					args: asRecord(data.args) ?? {},
-					chatId: asString(data.chatId)
+					chatId: asString(data.chatId),
+					requestedByUserId: asString(data.requestedByUserId),
+					requestedByDisplayName: asString(data.requestedByDisplayName)
 				}
 			};
 		}

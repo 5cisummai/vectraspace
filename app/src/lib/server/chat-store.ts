@@ -1,8 +1,9 @@
 import { randomInt } from 'node:crypto';
 import { db } from '$lib/server/db';
-import type { Prisma } from '@prisma/client';
+import type { Prisma, WorkspaceRole } from '@prisma/client';
 import type { ConversationMessage, StoredChatMessage } from '$lib/server/agent/types';
 import { getActiveRunForChat } from '$lib/server/agent-runs';
+import { emit as emitWorkspaceEvent } from '$lib/server/services/event-bus';
 import { summarizePromptAsChatTitle } from '$lib/server/services/llm';
 import { dedupeChatsById } from '$lib/utils.js';
 
@@ -13,11 +14,21 @@ type ChatMessageRow = {
 	id: string;
 	role: 'USER' | 'ASSISTANT';
 	content: string;
+	authorUserId: string | null;
+	authorDisplayName: string | null;
+	authorUsername: string | null;
 	sources: Prisma.JsonValue | null;
 	toolCalls: Prisma.JsonValue | null;
 	model: string | null;
 	iterations: number | null;
 	createdAt: Date;
+};
+
+type WorkspaceChatSessionRow = {
+	id: string;
+	title: string;
+	userId: string;
+	workspaceId: string | null;
 };
 
 export type ChatSummary = {
@@ -33,6 +44,12 @@ export type ChatSummaryWithStatus = ChatSummary & { status: ChatStatus };
 
 export type { StoredChatMessage } from '$lib/server/agent/types';
 
+export type ChatMessageAuthor = {
+	userId: string;
+	displayName: string;
+	username: string;
+};
+
 type ChatMessageMeta = {
 	sources?: unknown;
 	toolCalls?: unknown;
@@ -40,8 +57,49 @@ type ChatMessageMeta = {
 	iterations?: number;
 };
 
+type DeleteMessagesInput = {
+	userId: string;
+	userRole: WorkspaceRole;
+	chatId: string;
+	fromMessageId: string;
+	workspaceId?: string | null;
+};
+
 function sanitizeTitle(title: string): string {
 	return title.replace(/\s+/g, ' ').trim().slice(0, MAX_TITLE_LENGTH);
+}
+
+function canModerateWorkspaceChat(role: WorkspaceRole): boolean {
+	return role === 'ADMIN';
+}
+
+async function getChatSession(
+	chatId: string,
+	workspaceId?: string | null
+): Promise<WorkspaceChatSessionRow | null> {
+	const where =
+		workspaceId !== undefined && workspaceId !== null
+			? { id: chatId, workspaceId }
+			: { id: chatId };
+
+	return db.chatSession.findFirst({
+		where,
+		select: {
+			id: true,
+			title: true,
+			userId: true,
+			workspaceId: true
+		}
+	});
+}
+
+function emitChatEvent(
+	workspaceId: string | null | undefined,
+	type: string,
+	data: Record<string, unknown>
+): void {
+	if (!workspaceId) return;
+	emitWorkspaceEvent(workspaceId, type, data);
 }
 
 /** Short word lists for human-readable session names (not derived from the first prompt). */
@@ -112,18 +170,12 @@ const CHAT_TITLE_NOUNS = [
 	'Garden'
 ] as const;
 
-/**
- * Random two-word title for new agent sessions (not the user's first message).
- */
 export function generateChatTitle(): string {
 	const adj = CHAT_TITLE_ADJECTIVES[randomInt(CHAT_TITLE_ADJECTIVES.length)];
 	const noun = CHAT_TITLE_NOUNS[randomInt(CHAT_TITLE_NOUNS.length)];
 	return sanitizeTitle(`${adj} ${noun}`);
 }
 
-/**
- * Title for a newly created chat: explicit user title if provided, otherwise {@link generateChatTitle}.
- */
 export function titleForNewChat(explicitTitle?: string | null): string {
 	const normalized = sanitizeTitle(explicitTitle ?? '');
 	if (normalized) return normalized;
@@ -153,6 +205,9 @@ function toStoredMessage(row: ChatMessageRow): StoredChatMessage {
 		id: row.id,
 		role: row.role === 'USER' ? 'user' : 'assistant',
 		content: row.content,
+		authorUserId: row.authorUserId,
+		authorDisplayName: row.authorDisplayName,
+		authorUsername: row.authorUsername,
 		...(row.sources !== null ? { sources: row.sources } : {}),
 		...(row.toolCalls !== null ? { toolCalls: row.toolCalls } : {}),
 		...(row.model !== null ? { model: row.model } : {}),
@@ -207,6 +262,12 @@ export async function createChatForUser(
 		}
 	});
 
+	emitChatEvent(workspaceId, 'chat.created', {
+		chatId: row.id,
+		title: row.title,
+		createdByUserId: userId
+	});
+
 	return {
 		id: row.id,
 		title: row.title,
@@ -216,36 +277,34 @@ export async function createChatForUser(
 	};
 }
 
+export async function ensureWorkspaceChatSession(
+	chatId: string,
+	workspaceId?: string | null
+): Promise<WorkspaceChatSessionRow> {
+	const row = await getChatSession(chatId, workspaceId);
+	if (!row) {
+		throw new Error('Chat not found');
+	}
+	return row;
+}
+
 export async function ensureOwnedChatSession(
 	userId: string,
 	chatId: string,
 	workspaceId?: string | null
 ): Promise<{ id: string; title: string }> {
-	const where =
-		workspaceId !== undefined && workspaceId !== null
-			? { id: chatId, userId, workspaceId }
-			: { id: chatId, userId };
-
-	const row = await db.chatSession.findFirst({
-		where,
-		select: {
-			id: true,
-			title: true
-		}
-	});
-
-	if (!row) {
+	const row = await ensureWorkspaceChatSession(chatId, workspaceId);
+	if (row.userId !== userId) {
 		throw new Error('Chat not found');
 	}
-
-	return row;
+	return { id: row.id, title: row.title };
 }
 
-export async function getChatMessagesForUser(
-	userId: string,
-	chatId: string
+export async function getChatMessagesForWorkspace(
+	chatId: string,
+	workspaceId?: string | null
 ): Promise<StoredChatMessage[]> {
-	await ensureOwnedChatSession(userId, chatId);
+	await ensureWorkspaceChatSession(chatId, workspaceId);
 
 	const rows = await db.chatMessage.findMany({
 		where: { chatSessionId: chatId },
@@ -254,6 +313,9 @@ export async function getChatMessagesForUser(
 			id: true,
 			role: true,
 			content: true,
+			authorUserId: true,
+			authorDisplayName: true,
+			authorUsername: true,
 			sources: true,
 			toolCalls: true,
 			model: true,
@@ -265,7 +327,12 @@ export async function getChatMessagesForUser(
 	return rows.map(toStoredMessage);
 }
 
-export async function saveUserMessage(chatId: string, content: string): Promise<string | null> {
+export async function saveUserMessage(
+	chatId: string,
+	content: string,
+	author: ChatMessageAuthor,
+	workspaceId?: string | null
+): Promise<string | null> {
 	const trimmed = content.trim();
 	if (!trimmed) return null;
 
@@ -273,7 +340,10 @@ export async function saveUserMessage(chatId: string, content: string): Promise<
 		data: {
 			chatSessionId: chatId,
 			role: 'USER',
-			content: trimmed
+			content: trimmed,
+			authorUserId: author.userId,
+			authorDisplayName: author.displayName,
+			authorUsername: author.username
 		},
 		select: { id: true }
 	});
@@ -283,13 +353,23 @@ export async function saveUserMessage(chatId: string, content: string): Promise<
 		data: { updatedAt: new Date() }
 	});
 
+	emitChatEvent(workspaceId, 'chat.message', {
+		chatId,
+		messageId: row.id,
+		role: 'user',
+		authorUserId: author.userId,
+		authorDisplayName: author.displayName,
+		authorUsername: author.username
+	});
+
 	return row.id;
 }
 
 export async function saveAssistantMessage(
 	chatId: string,
 	content: string,
-	meta?: ChatMessageMeta
+	meta?: ChatMessageMeta,
+	workspaceId?: string | null
 ): Promise<string | null> {
 	const trimmed = content.trim();
 	if (!trimmed) return null;
@@ -312,33 +392,55 @@ export async function saveAssistantMessage(
 		data: { updatedAt: new Date() }
 	});
 
+	emitChatEvent(workspaceId, 'chat.message', {
+		chatId,
+		messageId: row.id,
+		role: 'assistant'
+	});
+
 	return row.id;
 }
 
-/**
- * Deletes the anchor message and every message after it (by chat order).
- * Used when editing a user message or regenerating an assistant reply.
- */
-export async function deleteMessagesFromMessageId(
-	userId: string,
-	chatId: string,
-	fromMessageId: string,
-	workspaceId?: string | null
-): Promise<void> {
-	await ensureOwnedChatSession(userId, chatId, workspaceId);
+export async function deleteMessagesFromMessageId(input: DeleteMessagesInput): Promise<void> {
+	const chat = await ensureWorkspaceChatSession(input.chatId, input.workspaceId);
 
 	const rows = await db.chatMessage.findMany({
-		where: { chatSessionId: chatId },
+		where: { chatSessionId: input.chatId },
 		orderBy: { createdAt: 'asc' },
-		select: { id: true }
+		select: {
+			id: true,
+			role: true,
+			authorUserId: true
+		}
 	});
 
-	const idx = rows.findIndex((r: { id: string }) => r.id === fromMessageId);
+	const idx = rows.findIndex((row) => row.id === input.fromMessageId);
 	if (idx === -1) {
 		throw new Error('Message not found');
 	}
 
-	const ids = rows.slice(idx).map((r: { id: string }) => r.id);
+	const actorCanModerate = canModerateWorkspaceChat(input.userRole);
+	const anchor = rows[idx];
+	if (!anchor) {
+		throw new Error('Message not found');
+	}
+
+	const editableByUserId =
+		anchor.role === 'USER'
+			? anchor.authorUserId
+			: (() => {
+		const precedingUser = [...rows.slice(0, idx)].reverse().find((row) => row.role === 'USER');
+				if (!precedingUser) {
+					throw new Error('Message not editable');
+				}
+				return precedingUser.authorUserId;
+			})();
+
+	if (!actorCanModerate && editableByUserId !== input.userId) {
+		throw new Error('Forbidden');
+	}
+
+	const ids = rows.slice(idx).map((row) => row.id);
 	if (ids.length === 0) return;
 
 	await db.chatMessage.deleteMany({
@@ -346,8 +448,15 @@ export async function deleteMessagesFromMessageId(
 	});
 
 	await db.chatSession.update({
-		where: { id: chatId },
+		where: { id: input.chatId },
 		data: { updatedAt: new Date() }
+	});
+
+	emitChatEvent(chat.workspaceId, 'chat.truncated', {
+		chatId: input.chatId,
+		fromMessageId: input.fromMessageId,
+		deletedMessageIds: ids,
+		actorUserId: input.userId
 	});
 }
 
@@ -358,7 +467,7 @@ export async function resolveOrCreateChat(
 	workspaceId?: string | null
 ): Promise<ChatSummary> {
 	if (chatId) {
-		const row = await ensureOwnedChatSession(userId, chatId, workspaceId);
+		const row = await ensureWorkspaceChatSession(chatId, workspaceId);
 		const found = await db.chatSession.findUniqueOrThrow({
 			where: { id: row.id },
 			select: {

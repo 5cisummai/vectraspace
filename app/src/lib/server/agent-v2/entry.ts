@@ -1,30 +1,20 @@
 // ---------------------------------------------------------------------------
-// agent/index.ts — Public API for the agent system
-//
-// useAgentV2 (default: on): runAgentV2 / confirmToolV2 with versioned SSE.
-// Legacy: run() + stream transport without v2 envelopes.
+// runAgentV2 / confirmToolV2 — public server API (OpenAI Agents SDK + V2 SSE)
 // ---------------------------------------------------------------------------
 
 import { error } from '@sveltejs/kit';
 import { RunState } from '@openai/agents';
-import type { AgentRequest, AgentRunConfig, ConfirmRunConfig } from './types';
-import { createAppContext, type AgentAppContext } from './context';
-import { AgentLogger } from './logger';
-import { normalizeFilters } from './filters';
-import { createStreamingResponse, createConfirmStreamingResponse } from './transport/stream';
-import { getMediaAgent } from './agent';
-import { configureAgentProvider } from './provider';
+import type { AgentRunConfig, ConfirmRunConfig, AskFilters } from '$lib/server/agent/types';
+import { createAppContext, type AgentAppContext } from '$lib/server/agent/context';
+import { AgentLogger } from '$lib/server/agent/logger';
+import { normalizeFilters } from '$lib/server/agent/filters';
+import { prepareAgentRun } from '$lib/server/agent/run-prepare';
+import { getMediaAgent } from '$lib/server/agent/agent';
+import { configureAgentProvider } from '$lib/server/agent/provider';
 import { takePendingConfirmation } from '$lib/server/pending-tool-confirmation';
-import { prepareAgentRun } from './run-prepare';
-import { useAgentV2 } from '$lib/server/features';
-import { runAgentV2, confirmToolV2 } from '$lib/server/agent-v2/entry';
+import { createV2ConfirmStreamingResponse, createV2StreamingResponse } from './transport-sse';
 
-// Configure the LLM provider once at module initialization
 configureAgentProvider();
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function makeContext(
 	config: {
@@ -35,7 +25,7 @@ function makeContext(
 		autoApproveToolNames?: string[];
 	},
 	logger: AgentLogger,
-	filters?: import('./types').AskFilters
+	filters?: AskFilters
 ): AgentAppContext {
 	return createAppContext({
 		userId: config.userId,
@@ -48,26 +38,12 @@ function makeContext(
 	});
 }
 
-// ---------------------------------------------------------------------------
-// runAgent
-// ---------------------------------------------------------------------------
-
-export async function runAgent(
+export async function runAgentV2(
 	question: string,
 	config: AgentRunConfig,
-	filters?: import('./types').AskFilters
+	filters?: AskFilters
 ): Promise<Response> {
-	if (useAgentV2) {
-		return runAgentV2(question, config, filters);
-	}
-
-	const logger = new AgentLogger();
-	const { chatId, bodyForAgent, savedUserMessageId } = await prepareAgentRun(
-		question,
-		config,
-		filters
-	);
-
+	const { chatId, bodyForAgent, savedUserMessageId } = await prepareAgentRun(question, config, filters);
 	const ctx = makeContext(
 		{
 			userId: config.userId,
@@ -76,44 +52,32 @@ export async function runAgent(
 			workspaceId: config.workspaceId,
 			autoApproveToolNames: config.autoApproveToolNames
 		},
-		logger,
+		new AgentLogger(),
 		filters
 	);
 
-	logger.info('agent.run.legacy', { chatId, regenerate: !!config.regenerate });
-
-	return createStreamingResponse(bodyForAgent, ctx, {
+	return createV2StreamingResponse(bodyForAgent, ctx, {
 		chatId,
 		kind: 'ask',
-		savedUserMessageId
+		savedUserMessageId,
+		workspaceId: config.workspaceId!
 	});
 }
 
-// ---------------------------------------------------------------------------
-// confirmTool
-// ---------------------------------------------------------------------------
-
-export async function confirmTool(config: ConfirmRunConfig): Promise<Response> {
-	if (useAgentV2) {
-		return confirmToolV2(config);
-	}
-
+export async function confirmToolV2(config: ConfirmRunConfig): Promise<Response> {
 	if (!config.workspaceId?.trim()) {
 		throw error(400, 'workspaceId is required');
 	}
 
 	const logger = new AgentLogger();
-
 	const taken = await takePendingConfirmation(config.userId, config.pendingId);
 	if (!taken) throw error(404, 'Confirmation expired or not found');
 	if (config.chatId && config.chatId !== taken.chatSessionId) throw error(400, 'Chat mismatch');
 
 	const { payload } = taken;
 	const chatId = taken.chatSessionId;
-
 	const agent = getMediaAgent();
 	const runState = await RunState.fromString(agent, payload.runState);
-
 	const interruptions = runState.getInterruptions();
 	if (interruptions.length > 0) {
 		const interruption = interruptions[0];
@@ -138,10 +102,9 @@ export async function confirmTool(config: ConfirmRunConfig): Promise<Response> {
 		logger
 	);
 
-	logger.info('agent.confirm.legacy', { chatId, approved: config.approved });
-
-	return createConfirmStreamingResponse(runState, ctx, {
+	return createV2ConfirmStreamingResponse(runState, ctx, {
 		chatId,
-		kind: 'confirm'
+		kind: 'confirm',
+		workspaceId: config.workspaceId
 	});
 }

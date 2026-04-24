@@ -8,6 +8,8 @@ This document defines the current chat/agent API contract so web, mobile, and CL
 - Workspace-scoped endpoints require membership in that workspace.
 - All IDs are CUID strings.
 - Chat/agent runs are workspace-scoped under `/api/workspaces/:workspaceId/*`.
+- Workspace chats are shared transcripts: any workspace member can read them, but edit/regenerate is limited to the author of the originating prompt (or a workspace admin).
+- Only one active agent run is allowed per chat at a time. Concurrent asks on the same chat return `409`.
 
 ## Core Endpoints
 
@@ -26,6 +28,7 @@ This document defines the current chat/agent API contract so web, mobile, and CL
 
 - `GET /api/workspaces/:workspaceId/chats/:chatId`
 - Response: `{ chat, messages[] }`.
+- `messages[]` now include author metadata for user messages: `authorUserId?`, `authorDisplayName?`, `authorUsername?`.
 
 ### Delete chat
 
@@ -57,6 +60,7 @@ This document defines the current chat/agent API contract so web, mobile, and CL
   - `chatId?: string`
   - `autoApproveToolNames?: string[]`
 - Response: `text/event-stream`.
+- Pending confirmations remain tied to the user who initiated the run.
 
 ### Active run snapshot
 
@@ -88,7 +92,7 @@ The ask/confirm endpoints stream these events:
 - `tool_done`
   - Payload: `{ tool, result }`
 - `confirmation`
-  - Payload: `{ pendingId, tool, args, chatId }`
+  - Payload: `{ pendingId, tool, args, chatId, requestedByUserId? }`
   - Stream pauses until confirmation endpoint resumes.
 - `meta`
   - Payload: `{ chatId, messageId, sources, toolCalls, model, iterations }`
@@ -116,3 +120,4 @@ The ask/confirm endpoints stream these events:
   4. If awaiting confirmation, call confirm endpoint with `pendingId`.
 - Store `autoApproveToolNames` via `/agent/settings` for cross-device/workspace parity.
 - Keep rendering and UX state local to each client; treat transcript + SSE events as backend truth.
+- For collaborative UIs, subscribe to workspace events and refresh the active transcript on `chat.message`, `chat.truncated`, `chat.deleted`, and `run.awaiting_confirmation`.

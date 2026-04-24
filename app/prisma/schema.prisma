@@ -64,6 +64,7 @@ model User {
 
   uploadedFiles            UploadedFile[]
   chatSessions             ChatSession[]
+  authoredChatMessages     ChatMessage[]
   pendingToolConfirmations PendingToolConfirmation[]
   workspaceMemberships     WorkspaceMember[]
   agentRuns                AgentRun[]
@@ -225,14 +226,19 @@ model ChatMessage {
   chatSessionId String
   role          ChatMessageRole
   content       String
+  authorUserId  String?
+  authorDisplayName String?
+  authorUsername String?
   sources       Json?
   toolCalls     Json?
   model         String?
   iterations    Int?
   createdAt     DateTime        @default(now())
   chatSession   ChatSession     @relation(fields: [chatSessionId], references: [id], onDelete: Cascade)
+  author        User?           @relation(fields: [authorUserId], references: [id], onDelete: SetNull)
 
   @@index([chatSessionId, createdAt])
+  @@index([authorUserId])
 }
 
 // ---------------------------------------------------------------------------
@@ -259,6 +265,24 @@ model AgentRun {
   @@index([workspaceId, chatId])
   @@index([chatId, status])
   @@index([userId, status])
+
+  v2StreamEvents AgentV2StreamEvent[]
+}
+
+/// Persisted Agent V2 SSE lines for `sinceSequence` replay (same run id).
+model AgentV2StreamEvent {
+  id         String   @id @default(cuid())
+  runId      String
+  sequence   Int
+  eventName  String
+  /// Full `data:` JSON (includes envelope: v, sequence, eventId, runId, workspaceId, …)
+  payload    Json
+  createdAt  DateTime @default(now())
+
+  run AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, sequence])
+  @@index([runId, sequence])
 }
 
 // ---------------------------------------------------------------------------

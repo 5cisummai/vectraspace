@@ -15,9 +15,18 @@ export const GET: RequestHandler = async (event) => {
 	return json({
 		id: run.id,
 		chatId: run.chatId,
+		userId: run.userId,
+		userDisplayName: run.userDisplayName ?? null,
+		userUsername: run.userUsername ?? null,
 		status: toApiStatus(run.status),
 		error: run.error ?? null,
-		pendingToolConfirmation: run.pendingToolConfirmation ?? null,
+		pendingToolConfirmation: run.pendingToolConfirmation
+			? {
+					...run.pendingToolConfirmation,
+					requestedByUserId: run.userId,
+					requestedByDisplayName: run.userDisplayName ?? run.userUsername ?? null
+				}
+			: null,
 		toolStreamLog: run.toolStreamLog ?? [],
 		steps: run.steps ?? [],
 		createdAt: run.createdAt,

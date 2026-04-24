@@ -10,7 +10,10 @@
 
 	let {
 		message,
+		currentUserId,
 		busy = false,
+		canEdit = false,
+		canRegenerate = false,
 		onEdit,
 		onRegenerate,
 		onCopy,
@@ -19,7 +22,10 @@
 		onVariantNext
 	}: {
 		message: ChatMessage;
+		currentUserId?: string | null;
 		busy?: boolean;
+		canEdit?: boolean;
+		canRegenerate?: boolean;
 		onEdit?: () => void;
 		onRegenerate?: () => void;
 		onCopy?: () => void;
@@ -51,9 +57,17 @@
 			: 0
 	);
 	const showVariants = $derived(variantCount > 1);
+	const isOwnMessage = $derived(
+		message.role === 'user' && !!message.authorUserId && message.authorUserId === currentUserId
+	);
+	const authorLabel = $derived.by(() => {
+		if (message.role === 'assistant') return 'Assistant';
+		const name = message.authorDisplayName || message.authorUsername || 'Workspace member';
+		return name;
+	});
 
 	function onUserBlockClick(e: MouseEvent) {
-		if (message.role !== 'user' || busy) return;
+		if (message.role !== 'user' || busy || !canEdit) return;
 		const sel = typeof window !== 'undefined' ? window.getSelection() : null;
 		if (sel?.toString().trim()) return;
 		const t = e.target as HTMLElement | null;
@@ -66,8 +80,11 @@
 	<div class="flex w-full flex-col gap-2">
 		<div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
 			<span class="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
-				{message.role === 'user' ? 'You' : 'Assistant'}
+				{authorLabel}
 			</span>
+			{#if isOwnMessage}
+				<span class="text-[10px] font-medium text-muted-foreground uppercase">You</span>
+			{/if}
 			{#if message.role === 'user' && message.editedFrom}
 				<span class="text-[10px] font-medium text-muted-foreground uppercase">Edited</span>
 			{/if}
@@ -80,10 +97,10 @@
 			<!-- svelte-ignore a11y_click_events_have_key_events -->
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div
-				class="text-[15px] leading-relaxed {message.role === 'user' && !busy
+				class="text-[15px] leading-relaxed {message.role === 'user' && !busy && canEdit
 					? 'cursor-pointer'
 					: ''}"
-				title={message.role === 'user' && !busy ? 'Click to edit' : undefined}
+				title={message.role === 'user' && !busy && canEdit ? 'Click to edit' : undefined}
 				onclick={message.role === 'user' ? onUserBlockClick : undefined}
 			>
 				<div
@@ -172,7 +189,7 @@
 					variant="ghost"
 					size="icon"
 					class="size-7 text-muted-foreground hover:text-foreground"
-					disabled={busy}
+					disabled={busy || !canRegenerate}
 					onclick={() => onRegenerate?.()}
 					aria-label="Regenerate response"
 				>

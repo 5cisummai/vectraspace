@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { tick, untrack } from 'svelte';
+	import { browser } from '$app/environment';
 	import { apiFetch } from '$lib/api-fetch';
 	import {
 		fetchServerAutoApproveToolNames,
@@ -36,6 +37,7 @@
 
 	let {
 		workspaceId,
+		currentUserId = null,
 		activeChatId = $bindable<string | null>(null),
 		activeAgentStatus = $bindable<'idle' | 'working' | 'done'>('idle'),
 		onListRefresh,
@@ -43,6 +45,7 @@
 	}: {
 		/** Active workspace — all brain/chat APIs are scoped under `/api/workspaces/:id`. */
 		workspaceId: string | null;
+		currentUserId?: string | null;
 		activeChatId?: string | null;
 		activeAgentStatus?: 'idle' | 'working' | 'done';
 		onListRefresh?: () => void;
@@ -71,6 +74,8 @@
 	let pendingScrollMessageId = $state<string | null>(null);
 	/** Aborts in-flight ask/confirm HTTP and SSE stream for the current run. */
 	let agentRunAbortController: AbortController | null = null;
+	let workspaceEvents: EventSource | null = null;
+	let workspaceEventsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
 	/** When false, the component has unmounted — ignore late SSE/poll callbacks (don't update state). */
 	const sseGuard = { active: true };
@@ -84,6 +89,12 @@
 				clearInterval(activeRunPollTimer);
 				activeRunPollTimer = null;
 			}
+			if (workspaceEventsReconnectTimer) {
+				clearTimeout(workspaceEventsReconnectTimer);
+				workspaceEventsReconnectTimer = null;
+			}
+			workspaceEvents?.close();
+			workspaceEvents = null;
 		};
 	});
 
@@ -125,6 +136,10 @@
 	});
 
 	const SUBMIT_DEBOUNCE_MS = 400;
+	const canApprovePending = $derived(
+		!streamState.pendingToolConfirmation?.requestedByUserId ||
+			streamState.pendingToolConfirmation.requestedByUserId === currentUserId
+	);
 
 	function isAbortError(err: unknown): boolean {
 		return (
@@ -132,6 +147,111 @@
 			(err instanceof Error && err.name === 'AbortError')
 		);
 	}
+
+	async function handleWorkspaceEvent(
+		type: string,
+		payload: Record<string, unknown>
+	): Promise<void> {
+		if (!sseGuard.active) return;
+		const eventChatId = typeof payload.chatId === 'string' ? payload.chatId : null;
+
+		switch (type) {
+			case 'chat.created':
+				onListRefresh?.();
+				return;
+			case 'chat.deleted':
+				onListRefresh?.();
+				if (eventChatId && eventChatId === activeChatId) {
+					resetConversation();
+					error = 'This chat was deleted.';
+				}
+				return;
+			case 'chat.message':
+			case 'chat.truncated':
+				onListRefresh?.();
+				if (eventChatId && eventChatId === activeChatId) {
+					await refreshMessagesFromServer(eventChatId);
+				}
+				return;
+			case 'run.awaiting_confirmation':
+				onListRefresh?.();
+				if (eventChatId && eventChatId === activeChatId) {
+					await syncActiveRunAfterLoad(eventChatId);
+				}
+				return;
+			case 'run.status': {
+				onListRefresh?.();
+				const status = typeof payload.status === 'string' ? payload.status : null;
+				if (!eventChatId || eventChatId !== activeChatId || !status) return;
+
+				if ((status === 'queued' || status === 'running') && !loading) {
+					await syncActiveRunAfterLoad(eventChatId);
+					return;
+				}
+				if (status === 'done' || status === 'failed') {
+					clearActiveRunPoll();
+					activeAgentStatus = 'done';
+					await refreshMessagesFromServer(eventChatId);
+				}
+				return;
+			}
+		}
+	}
+
+	function connectWorkspaceEvents(workspace: string | null) {
+		if (!browser) return;
+
+		if (workspaceEventsReconnectTimer) {
+			clearTimeout(workspaceEventsReconnectTimer);
+			workspaceEventsReconnectTimer = null;
+		}
+		workspaceEvents?.close();
+		workspaceEvents = null;
+
+		if (!workspace) return;
+
+		const types = [
+			'chat.created',
+			'chat.deleted',
+			'chat.message',
+			'chat.truncated',
+			'run.awaiting_confirmation',
+			'run.status'
+		].join(',');
+		const es = new EventSource(
+			`/api/workspaces/${encodeURIComponent(workspace)}/events?types=${encodeURIComponent(types)}`
+		);
+		workspaceEvents = es;
+
+		for (const type of types.split(',')) {
+			es.addEventListener(type, (event: MessageEvent<string>) => {
+				try {
+					const payload = JSON.parse(event.data) as Record<string, unknown>;
+					void handleWorkspaceEvent(type, payload);
+				} catch {
+					// ignore malformed events
+				}
+			});
+		}
+
+		es.onerror = () => {
+			es.close();
+			if (workspaceEvents === es) {
+				workspaceEvents = null;
+			}
+			if (workspaceEventsReconnectTimer) clearTimeout(workspaceEventsReconnectTimer);
+			workspaceEventsReconnectTimer = setTimeout(() => {
+				workspaceEventsReconnectTimer = null;
+				if (sseGuard.active) {
+					connectWorkspaceEvents(workspaceId);
+				}
+			}, 5000);
+		};
+	}
+
+	$effect(() => {
+		connectWorkspaceEvents(workspaceId);
+	});
 
 	function handleSSEEvent(event: AgentSseEvent): void {
 		if (!sseGuard.active) return;
@@ -295,12 +415,14 @@
 
 			// Stream finished
 			if (!sseGuard.active) return;
+			const pendingToolConfirmation = streamState.pendingToolConfirmation;
 			loading = false;
 			streamState = resetAgentRunStreamState(streamState, {
-				activeChatId: activeChatId ?? undefined
+				activeChatId: activeChatId ?? undefined,
+				pendingToolConfirmation
 			});
 			agentRunAbortController = null;
-			activeAgentStatus = streamState.pendingToolConfirmation ? 'done' : 'done';
+			activeAgentStatus = 'done';
 			onListRefresh?.();
 		} catch (err) {
 			if (isAbortError(err)) {
@@ -337,6 +459,7 @@
 			role: 'user',
 			content: text,
 			status: 'success',
+			authorUserId: currentUserId,
 			editedFrom: null
 		};
 
@@ -442,6 +565,9 @@
 			id: string;
 			role: 'user' | 'assistant';
 			content: string;
+			authorUserId?: string;
+			authorDisplayName?: string;
+			authorUsername?: string;
 			sources?: Source[];
 			toolCalls?: ToolCallSummary[];
 			model?: string;
@@ -453,6 +579,9 @@
 			role: row.role,
 			content: row.content,
 			status: 'success' as const,
+			authorUserId: row.authorUserId,
+			authorDisplayName: row.authorDisplayName,
+			authorUsername: row.authorUsername,
 			sources: row.sources,
 			toolCalls: row.toolCalls,
 			model: row.model,
@@ -606,10 +735,22 @@
 	}
 
 	async function startEditUser(message: ChatMessage) {
-		if (message.role !== 'user' || loading || remoteRunPending || !activeChatId) return;
+		if (!canEditUserMessage(message) || loading || remoteRunPending || !activeChatId) return;
 		editingUserId = message.id;
 		editDraft = message.content;
 		await tick();
+	}
+
+	function canEditUserMessage(message: ChatMessage): boolean {
+		return message.role === 'user' && !!currentUserId && message.authorUserId === currentUserId;
+	}
+
+	function canRegenerateAssistantMessage(message: ChatMessage): boolean {
+		if (message.role !== 'assistant' || !currentUserId) return false;
+		const idx = messages.findIndex((candidate) => candidate.id === message.id);
+		if (idx < 1) return false;
+		const precedingUser = messages[idx - 1];
+		return precedingUser?.role === 'user' && precedingUser.authorUserId === currentUserId;
 	}
 
 	function cancelEdit() {
@@ -643,6 +784,7 @@
 			role: 'user',
 			content: text,
 			status: 'success',
+			authorUserId: currentUserId,
 			editedFrom: prevContent
 		};
 		messages = [...messages, userMessage];
@@ -652,7 +794,9 @@
 	}
 
 	async function regenerateAssistant(message: ChatMessage) {
-		if (message.role !== 'assistant' || loading || remoteRunPending || !activeChatId) return;
+		if (!canRegenerateAssistantMessage(message) || loading || remoteRunPending || !activeChatId) {
+			return;
+		}
 		if (!guardSubmit()) return;
 
 		const idx = messages.findIndex((m) => m.id === message.id);
@@ -879,9 +1023,14 @@
 						{:else}
 							<ChatMessageBubble
 								{message}
+								{currentUserId}
 								busy={loading || remoteRunPending}
-								onEdit={() => startEditUser(message)}
-								onRegenerate={() => regenerateAssistant(message)}
+								canEdit={canEditUserMessage(message)}
+								canRegenerate={canRegenerateAssistantMessage(message)}
+								onEdit={canEditUserMessage(message) ? () => startEditUser(message) : undefined}
+								onRegenerate={canRegenerateAssistantMessage(message)
+									? () => regenerateAssistant(message)
+									: undefined}
 								onCopy={() => copyMessage(message)}
 								onRetry={() => retryLastFailed(message)}
 								onVariantPrev={() => variantPrev(message)}
@@ -957,6 +1106,7 @@
 								content: streamState.streamingText,
 								status: 'success'
 							}}
+							{currentUserId}
 							busy={true}
 						/>
 					</div>
@@ -1021,7 +1171,7 @@
 				>
 					<Checkbox
 						bind:checked={autoApproveThisKind}
-						disabled={loading}
+						disabled={loading || !canApprovePending}
 						class="mt-0.5 size-3.5 shrink-0"
 					/>
 					<span>
@@ -1032,11 +1182,18 @@
 						actions in this browser (skip this prompt next time)
 					</span>
 				</label>
+				{#if !canApprovePending}
+					<p class="mt-3 text-xs text-muted-foreground">
+						Only {streamState.pendingToolConfirmation.requestedByDisplayName ??
+							'the initiating user'}
+						can approve this action.
+					</p>
+				{/if}
 				<div class="mt-3 flex flex-wrap gap-2">
 					<Button
 						type="button"
 						size="sm"
-						disabled={loading}
+						disabled={loading || !canApprovePending}
 						onclick={() => submitToolConfirmation(true, autoApproveThisKind)}
 					>
 						Approve
@@ -1045,7 +1202,7 @@
 						type="button"
 						size="sm"
 						variant="outline"
-						disabled={loading}
+						disabled={loading || !canApprovePending}
 						onclick={() => submitToolConfirmation(false)}
 					>
 						Deny

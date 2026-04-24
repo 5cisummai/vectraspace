@@ -37,6 +37,8 @@ export type BackgroundToolStreamEntry = {
 export interface AgentRunRecord {
 	id: string;
 	userId: string;
+	userDisplayName?: string | null;
+	userUsername?: string | null;
 	chatId: string;
 	workspaceId: string | null;
 	kind: string;
@@ -124,6 +126,7 @@ function toRecord(row: {
 	error: string | null;
 	metadata: unknown;
 	steps: unknown;
+	user?: { displayName: string; username: string } | null;
 	createdAt: Date;
 	updatedAt: Date;
 }): AgentRunRecord {
@@ -134,6 +137,8 @@ function toRecord(row: {
 	return {
 		id: row.id,
 		userId: row.userId,
+		userDisplayName: row.user?.displayName ?? null,
+		userUsername: row.user?.username ?? null,
 		chatId: row.chatId,
 		workspaceId: row.workspaceId,
 		kind: row.kind,
@@ -212,6 +217,13 @@ export async function markRunAwaitingConfirmation(
 		});
 		const record = toRecord(row);
 		emit(record);
+		if (record.workspaceId) {
+			emitWorkspaceEvent(record.workspaceId, 'run.awaiting_confirmation', {
+				chatId: record.chatId,
+				runId: record.id,
+				pendingToolConfirmation: pending
+			});
+		}
 		return record;
 	} catch {
 		return null;
@@ -279,14 +291,9 @@ export async function appendRunStep(runId: string, step: RunStep): Promise<void>
  * When a continuation run starts after tool confirmation, retire any
  * stale runs for the same chat so getActiveRunForChat returns the new one.
  */
-export async function supersedeOtherRunsForChat(
-	userId: string,
-	chatId: string,
-	keepRunId: string
-): Promise<void> {
+export async function supersedeOtherRunsForChat(chatId: string, keepRunId: string): Promise<void> {
 	await db.agentRun.updateMany({
 		where: {
-			userId,
 			chatId,
 			id: { not: keepRunId },
 			status: { notIn: ['DONE', 'FAILED'] }
@@ -306,7 +313,28 @@ export async function getAgentRun(runId: string, userId?: string): Promise<Agent
 	const where: Record<string, unknown> = { id: runId };
 	if (userId) where.userId = userId;
 
-	const row = await db.agentRun.findFirst({ where });
+	const row = await db.agentRun.findFirst({
+		where,
+		select: {
+			id: true,
+			userId: true,
+			chatId: true,
+			workspaceId: true,
+			kind: true,
+			status: true,
+			error: true,
+			metadata: true,
+			steps: true,
+			createdAt: true,
+			updatedAt: true,
+			user: {
+				select: {
+					displayName: true,
+					username: true
+				}
+			}
+		}
+	});
 	return row ? toRecord(row) : null;
 }
 
@@ -315,7 +343,26 @@ export async function getAgentRunForWorkspace(
 	runId: string
 ): Promise<AgentRunRecord | null> {
 	const row = await db.agentRun.findFirst({
-		where: { id: runId, workspaceId }
+		where: { id: runId, workspaceId },
+		select: {
+			id: true,
+			userId: true,
+			chatId: true,
+			workspaceId: true,
+			kind: true,
+			status: true,
+			error: true,
+			metadata: true,
+			steps: true,
+			createdAt: true,
+			updatedAt: true,
+			user: {
+				select: {
+					displayName: true,
+					username: true
+				}
+			}
+		}
 	});
 	return row ? toRecord(row) : null;
 }
@@ -332,7 +379,26 @@ export async function getActiveRunForChat(
 
 	const row = await db.agentRun.findFirst({
 		where,
-		orderBy: { createdAt: 'desc' }
+		orderBy: { createdAt: 'desc' },
+		select: {
+			id: true,
+			userId: true,
+			chatId: true,
+			workspaceId: true,
+			kind: true,
+			status: true,
+			error: true,
+			metadata: true,
+			steps: true,
+			createdAt: true,
+			updatedAt: true,
+			user: {
+				select: {
+					displayName: true,
+					username: true
+				}
+			}
+		}
 	});
 	return row ? toRecord(row) : null;
 }

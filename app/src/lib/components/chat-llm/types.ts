@@ -19,6 +19,9 @@ export interface ChatMessage {
 	role: 'user' | 'assistant';
 	content: string;
 	status: MessageStatus;
+	authorUserId?: string | null;
+	authorDisplayName?: string | null;
+	authorUsername?: string | null;
 	sources?: Source[];
 	toolCalls?: ToolCallSummary[];
 	iterations?: number;
@@ -37,11 +40,23 @@ export interface ChatMessage {
 }
 
 export interface ChatResponsePayload {
-	chat: { id: string; title: string };
+	chat: {
+		id: string;
+		title: string;
+		userId?: string;
+		createdBy?: {
+			userId: string;
+			username: string;
+			displayName: string;
+		};
+	};
 	messages: Array<{
 		id: string;
 		role: 'user' | 'assistant';
 		content: string;
+		authorUserId?: string;
+		authorDisplayName?: string;
+		authorUsername?: string;
 		sources?: Source[];
 		toolCalls?: ToolCallSummary[];
 		model?: string;
@@ -55,4 +70,6 @@ export interface PendingToolConfirmation {
 	tool: string;
 	args: Record<string, unknown>;
 	chatId?: string;
+	requestedByUserId?: string;
+	requestedByDisplayName?: string | null;
 }

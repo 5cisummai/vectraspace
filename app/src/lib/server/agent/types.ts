@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import type { MediaType } from '$lib/server/services/storage';
+import type { WorkspaceRole } from '@prisma/client';
 
 // ---------------------------------------------------------------------------
 // Filters
@@ -59,6 +60,9 @@ export interface StoredChatMessage {
 	id: string;
 	role: 'user' | 'assistant';
 	content: string;
+	authorUserId?: string | null;
+	authorDisplayName?: string | null;
+	authorUsername?: string | null;
 	sources?: unknown;
 	toolCalls?: unknown;
 	model?: string | null;
@@ -127,7 +131,10 @@ export interface AgentMetaPayload {
 
 export interface AgentRunConfig {
 	userId: string;
+	userDisplayName: string;
+	userUsername: string;
 	isAdmin: boolean;
+	workspaceRole: WorkspaceRole;
 	chatId?: string;
 	/** Required — agent runs are always scoped to a workspace. */
 	workspaceId: string;
@@ -142,6 +149,7 @@ export interface AgentRunConfig {
 export interface ConfirmRunConfig {
 	userId: string;
 	isAdmin: boolean;
+	workspaceRole: WorkspaceRole;
 	pendingId: string;
 	approved: boolean;
 	chatId?: string;
