@@ -1,7 +1,3 @@
-// ---------------------------------------------------------------------------
-// agent/tools/mutations.ts — File-mutating tools (SDK tool() + Zod + needsApproval)
-// ---------------------------------------------------------------------------
-
 import { tool } from '@openai/agents';
 import type { RunContext } from '@openai/agents';
 import { z } from 'zod';
@@ -15,10 +11,6 @@ import {
 import type { AgentAppContext } from '../context';
 import { shouldAutoApproveTool } from '../auto-approve-tools';
 import { summarizeToolResult } from '../loop-utils';
-
-// ---------------------------------------------------------------------------
-// Helper — wrap mutating tool with event emission + needsApproval callback
-// ---------------------------------------------------------------------------
 
 function makeMutatingExecute<T extends Record<string, unknown>>(
 	toolName: string,
@@ -48,10 +40,6 @@ function makeNeedsApproval(toolName: string) {
 	};
 }
 
-// ---------------------------------------------------------------------------
-// delete_file
-// ---------------------------------------------------------------------------
-
 export const deleteFileTool = tool({
 	name: 'delete_file',
 	description:
@@ -73,10 +61,6 @@ export const deleteFileTool = tool({
 		);
 	})
 });
-
-// ---------------------------------------------------------------------------
-// move (single path or batch into a directory)
-// ---------------------------------------------------------------------------
 
 const moveParameters = z.object({
 	source_path: z
@@ -152,10 +136,6 @@ export const moveTool = tool({
 	})
 });
 
-// ---------------------------------------------------------------------------
-// copy_file
-// ---------------------------------------------------------------------------
-
 export const copyFileTool = tool({
 	name: 'copy_file',
 	description:
@@ -176,10 +156,6 @@ export const copyFileTool = tool({
 		);
 	})
 });
-
-// ---------------------------------------------------------------------------
-// mkdir
-// ---------------------------------------------------------------------------
 
 export const mkdirTool = tool({
 	name: 'mkdir',

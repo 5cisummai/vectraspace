@@ -1,7 +1,3 @@
-// ---------------------------------------------------------------------------
-// agent/logger.ts — Structured agent logger with per-run trace context
-// ---------------------------------------------------------------------------
-
 import { randomUUID } from 'node:crypto';
 
 export interface AgentLogEntry {
@@ -12,12 +8,6 @@ export interface AgentLogEntry {
 	data?: Record<string, unknown>;
 }
 
-/**
- * Lightweight structured logger scoped to a single agent run.
- *
- * Every log entry carries a `traceId` so you can correlate all events
- * belonging to the same run in production logs.
- */
 export class AgentLogger {
 	readonly traceId: string;
 	private startMs: number;
@@ -36,8 +26,6 @@ export class AgentLogger {
 			...(data ? { data } : {})
 		};
 
-		// In production, pipe to a structured logging backend.
-		// For now, use console with JSON for machine-parseable output.
 		if (level === 'error') {
 			console.error(JSON.stringify(entry));
 		} else if (level === 'warn') {
@@ -63,7 +51,6 @@ export class AgentLogger {
 		this.emit('error', event, data);
 	}
 
-	/** Elapsed milliseconds since the logger was created. */
 	elapsed(): number {
 		return Date.now() - this.startMs;
 	}

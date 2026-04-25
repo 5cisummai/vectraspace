@@ -1,7 +1,7 @@
 import { randomInt } from 'node:crypto';
 import { db } from '$lib/server/db';
 import type { Prisma, WorkspaceRole } from '@prisma/client';
-import type { ConversationMessage, StoredChatMessage } from '$lib/server/agent/types';
+import type { ConversationMessage, StoredChatMessage } from '$lib/server/agent-v2/types';
 import { getActiveRunForChat } from '$lib/server/agent-runs';
 import { emit as emitWorkspaceEvent } from '$lib/server/services/event-bus';
 import { summarizePromptAsChatTitle } from '$lib/server/services/llm';
@@ -42,7 +42,7 @@ export type ChatSummary = {
 export type ChatStatus = 'idle' | 'working' | 'done';
 export type ChatSummaryWithStatus = ChatSummary & { status: ChatStatus };
 
-export type { StoredChatMessage } from '$lib/server/agent/types';
+export type { StoredChatMessage } from '$lib/server/agent-v2/types';
 
 export type ChatMessageAuthor = {
 	userId: string;

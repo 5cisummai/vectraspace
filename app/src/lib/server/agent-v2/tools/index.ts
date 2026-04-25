@@ -1,7 +1,3 @@
-// ---------------------------------------------------------------------------
-// agent/tools/index.ts — Public API: flat SDK tool array factory
-// ---------------------------------------------------------------------------
-
 import type { Tool } from '@openai/agents';
 import type { AgentAppContext } from '../context';
 import { searchTool } from './search';

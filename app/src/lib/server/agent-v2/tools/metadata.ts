@@ -1,7 +1,3 @@
-// ---------------------------------------------------------------------------
-// agent/tools/metadata.ts — Metadata-only search tool (SDK tool() + Zod)
-// ---------------------------------------------------------------------------
-
 import { tool } from '@openai/agents';
 import type { RunContext } from '@openai/agents';
 import { z } from 'zod';

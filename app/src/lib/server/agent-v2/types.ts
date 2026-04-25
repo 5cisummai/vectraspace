@@ -1,13 +1,5 @@
-// ---------------------------------------------------------------------------
-// agent/types.ts — Shared types for the entire agent system
-// ---------------------------------------------------------------------------
-
 import type { MediaType } from '$lib/server/services/storage';
 import type { WorkspaceRole } from '@prisma/client';
-
-// ---------------------------------------------------------------------------
-// Filters
-// ---------------------------------------------------------------------------
 
 export interface AskFilters {
 	mediaType?: MediaType;
@@ -16,10 +8,6 @@ export interface AskFilters {
 	limit?: number;
 	minScore?: number;
 }
-
-// ---------------------------------------------------------------------------
-// Sources & tool call summaries
-// ---------------------------------------------------------------------------
 
 export interface Source {
 	fileId: string;
@@ -34,28 +22,18 @@ export interface ToolCallSummary {
 	resultSummary: string;
 }
 
-// ---------------------------------------------------------------------------
-// Agent request
-// ---------------------------------------------------------------------------
-
 export interface AgentRequest {
 	question: string;
 	history?: StoredChatMessage[];
 	filters?: AskFilters;
-	/**
-	 * Tool names the client has opted to run without confirmation (browser preference).
-	 * Server only honors names that are mutating tools with needsApproval.
-	 */
 	autoApproveToolNames?: string[];
 }
 
-/** Minimal chat message shape (user/assistant only — persisted in DB). */
 export interface ConversationMessage {
 	role: 'user' | 'assistant';
 	content: string;
 }
 
-/** Stored message from DB with optional tool call metadata. */
 export interface StoredChatMessage {
 	id: string;
 	role: 'user' | 'assistant';
@@ -69,10 +47,6 @@ export interface StoredChatMessage {
 	iterations?: number | null;
 	createdAt: string;
 }
-
-// ---------------------------------------------------------------------------
-// Agent outcome (returned by the loop)
-// ---------------------------------------------------------------------------
 
 export type AgentOutcome = AgentComplete | AgentPendingConfirmation;
 
@@ -93,10 +67,6 @@ export interface AgentPendingConfirmation {
 	sources: Map<string, Source>;
 	iterations: number;
 }
-
-// ---------------------------------------------------------------------------
-// Agent events (emitted during execution for streaming / background tracking)
-// ---------------------------------------------------------------------------
 
 export type AgentEvent =
 	| { type: 'tool_start'; tool: string; args?: Record<string, unknown> }
@@ -125,10 +95,6 @@ export interface AgentMetaPayload {
 	awaitingConfirmation?: boolean;
 }
 
-// ---------------------------------------------------------------------------
-// Run configuration (passed to public API)
-// ---------------------------------------------------------------------------
-
 export interface AgentRunConfig {
 	userId: string;
 	userDisplayName: string;
@@ -136,13 +102,9 @@ export interface AgentRunConfig {
 	isAdmin: boolean;
 	workspaceRole: WorkspaceRole;
 	chatId?: string;
-	/** Required — agent runs are always scoped to a workspace. */
 	workspaceId: string;
-	/** When true, replay the last user message instead of appending a new one. */
 	regenerate?: boolean;
-	/** Limit context window to N most recent messages. */
 	maxHistoryMessages?: number;
-	/** Client opt-in: these mutating tools run without a confirmation step. */
 	autoApproveToolNames?: string[];
 }
 
@@ -156,10 +118,6 @@ export interface ConfirmRunConfig {
 	workspaceId: string;
 	autoApproveToolNames?: string[];
 }
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
 
 export const DEFAULT_LIMIT = 8;
 export const DEFAULT_MIN_SCORE = 0.5;

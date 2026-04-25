@@ -21,6 +21,7 @@
 	import { fsHistory } from '$lib/hooks/fs-history.svelte';
 	import { IsMobile } from '$lib/hooks/is-mobile.svelte.js';
 	import { IsSmallMobile } from '$lib/hooks/is-small-mobile.svelte.js';
+	import { workspaceStore } from '$lib/hooks/workspace.svelte';
 
 	import type { FileEntry } from './file-grid.svelte';
 	import type { FileTreeNode } from './file-tree.svelte';
@@ -95,6 +96,8 @@
 	let searchQuery = $state('');
 	let recursiveSearchEntries = $state<FileEntry[]>([]);
 	let recursiveSearchLoaded = $state(false);
+	let semanticScores = $state<Map<string, number>>(new Map());
+	let semanticSearchLoaded = $state(false);
 
 	$effect(() => {
 		void currentPath;
@@ -102,36 +105,18 @@
 		searchQuery = '';
 		recursiveSearchEntries = [];
 		recursiveSearchLoaded = false;
+		semanticScores = new Map();
+		semanticSearchLoaded = false;
 	});
 
 	const normalizedSearchQuery = $derived(searchQuery.trim().toLowerCase());
-
-	const SEMANTIC_GROUPS = {
-		image: [
-			'image',
-			'images',
-			'photo',
-			'photos',
-			'pic',
-			'pics',
-			'picture',
-			'pictures',
-			'screenshot'
-		],
-		video: ['video', 'videos', 'movie', 'movies', 'clip', 'clips', 'film', 'films'],
-		audio: ['audio', 'song', 'songs', 'music', 'track', 'tracks', 'sound', 'sounds', 'voice'],
-		document: ['document', 'documents', 'doc', 'docs', 'pdf', 'text', 'note', 'notes'],
-		directory: ['directory', 'directories', 'folder', 'folders', 'dir', 'collection']
-	} as const;
-
-	const SEMANTIC_LOOKUP = (() => {
-		const map = new Map<string, Set<string>>();
-		for (const values of Object.values(SEMANTIC_GROUPS)) {
-			const group = new Set(values);
-			for (const value of values) map.set(value, group);
-		}
-		return map;
-	})();
+	const activeWorkspaceId = $derived(workspaceStore.activeId);
+	const currentRootIndex = $derived.by(() => {
+		if (!currentPath) return undefined;
+		const first = currentPath.split('/')[0] ?? '';
+		const parsed = Number.parseInt(first, 10);
+		return Number.isNaN(parsed) ? undefined : parsed;
+	});
 
 	function tokenize(value: string): string[] {
 		return value
@@ -141,29 +126,13 @@
 			.filter(Boolean);
 	}
 
-	function expandSemanticTokens(tokens: string[]): Set<string> {
-		const expanded = new Set<string>(tokens);
-		for (const token of tokens) {
-			const semanticGroup = SEMANTIC_LOOKUP.get(token);
-			if (!semanticGroup) continue;
-			for (const synonym of semanticGroup) expanded.add(synonym);
-		}
-		return expanded;
-	}
-
-	function scoreEntry(entry: FileEntry, query: string): number {
+	function scoreEntry(entry: FileEntry, query: string, semanticScore = 0): number {
 		const queryTokens = tokenize(query);
 		if (queryTokens.length === 0) return 0;
 
 		const nameLower = entry.name.toLowerCase();
 		const pathLower = entry.path.toLowerCase();
 		const nameTokens = tokenize(entry.name);
-		const pathTokens = tokenize(entry.path);
-		const kindToken = entry.type === 'directory' ? 'directory' : 'document';
-		const mediaTokens = tokenize(`${entry.mediaType ?? ''} ${entry.mimeType ?? ''} ${kindToken}`);
-
-		const entryConcepts = expandSemanticTokens([...nameTokens, ...pathTokens, ...mediaTokens]);
-		const queryConcepts = expandSemanticTokens(queryTokens);
 
 		let score = 0;
 
@@ -174,14 +143,12 @@
 			if (nameTokens.includes(token)) score += 25;
 		}
 
-		// Semantic overlap signal.
-		for (const concept of queryConcepts) {
-			if (entryConcepts.has(concept)) score += 18;
-		}
-
 		// Slight boost for full-query contiguous match.
 		if (nameLower.includes(query)) score += 40;
 		if (pathLower.includes(query)) score += 20;
+
+		// Semantic API score (0..1-ish) is amplified to compete with lexical signals.
+		if (semanticScore > 0) score += semanticScore * 140;
 
 		return score;
 	}
@@ -227,11 +194,57 @@
 		return () => controller.abort();
 	});
 
+	$effect(() => {
+		if (!browser || !normalizedSearchQuery || !activeWorkspaceId) {
+			semanticScores = new Map();
+			semanticSearchLoaded = false;
+			return;
+		}
+
+		const controller = new AbortController();
+		semanticSearchLoaded = false;
+		const params = new URLSearchParams({
+			q: normalizedSearchQuery,
+			limit: '100'
+		});
+		if (typeof currentRootIndex === 'number') {
+			params.set('root', String(currentRootIndex));
+		}
+
+		void fetch(
+			`/api/workspaces/${encodeURIComponent(activeWorkspaceId)}/search?${params.toString()}`,
+			{ signal: controller.signal }
+		)
+			.then(async (res) => {
+				if (!res.ok) throw new Error(`HTTP ${res.status}`);
+				return (await res.json()) as { results?: Array<{ path: string; score: number }> };
+			})
+			.then((payload) => {
+				const next = new Map<string, number>();
+				for (const row of payload.results ?? []) {
+					if (!row.path || typeof row.score !== 'number') continue;
+					next.set(row.path, row.score);
+				}
+				semanticScores = next;
+				semanticSearchLoaded = true;
+			})
+			.catch((err: unknown) => {
+				if (err instanceof DOMException && err.name === 'AbortError') return;
+				semanticScores = new Map();
+				semanticSearchLoaded = true;
+			});
+
+		return () => controller.abort();
+	});
+
 	const filteredFolderContents = $derived.by(() => {
 		if (!normalizedSearchQuery) return folderContents;
 		const source = recursiveSearchLoaded ? recursiveSearchEntries : folderContents;
 		return source
-			.map((entry) => ({ entry, score: scoreEntry(entry, normalizedSearchQuery) }))
+			.map((entry) => ({
+				entry,
+				score: scoreEntry(entry, normalizedSearchQuery, semanticScores.get(entry.path) ?? 0)
+			}))
 			.filter((result) => result.score > 0)
 			.sort((a, b) => b.score - a.score || a.entry.name.localeCompare(b.entry.name))
 			.map((result) => result.entry);

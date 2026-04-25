@@ -1,4 +1,4 @@
-import type { AskFilters } from '$lib/server/agent/types';
+import type { AskFilters } from '$lib/server/agent-v2/types';
 
 export type CreateAgentV2RunBody = {
 	question: string;

@@ -1,5 +1,5 @@
 import { db } from '$lib/server/db';
-import { normalizeAutoApproveToolNames } from '$lib/server/agent/auto-approve-tools';
+import { normalizeAutoApproveToolNames } from '$lib/server/agent-v2/auto-approve-tools';
 
 export interface AgentPreference {
 	autoApproveToolNames: string[];

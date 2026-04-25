@@ -1,13 +1,18 @@
 import { apiFetch } from '$lib/api-fetch';
 
-const STORAGE_KEY = 'brain.agent.autoApproveToolNames';
+const STORAGE_KEY = 'agent.v2.autoApproveToolNames';
+const LEGACY_STORAGE_KEY = 'brain.agent.autoApproveToolNames';
 const MAX_TOOLS = 32;
 
 function parseStored(): string[] {
 	if (typeof localStorage === 'undefined') return [];
 	try {
-		const raw = localStorage.getItem(STORAGE_KEY);
-		if (!raw) return [];
+		let raw = localStorage.getItem(STORAGE_KEY);
+		if (!raw) {
+			const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+			if (!legacy) return [];
+			raw = legacy;
+		}
 		const parsed = JSON.parse(raw) as unknown;
 		if (!Array.isArray(parsed)) return [];
 		const out: string[] = [];
@@ -19,6 +24,13 @@ function parseStored(): string[] {
 			seen.add(n);
 			out.push(n);
 			if (out.length >= MAX_TOOLS) break;
+		}
+		// One-time browser migration from legacy key.
+		if (!localStorage.getItem(STORAGE_KEY) && out.length > 0) {
+			localStorage.setItem(STORAGE_KEY, JSON.stringify(out));
+		}
+		if (localStorage.getItem(LEGACY_STORAGE_KEY)) {
+			localStorage.removeItem(LEGACY_STORAGE_KEY);
 		}
 		return out;
 	} catch {
@@ -151,7 +163,7 @@ export function setAutoApproveToolNames(names: string[]): void {
 }
 
 export async function fetchServerAutoApproveToolNames(workspaceId: string): Promise<string[]> {
-	const res = await apiFetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/agent/settings`);
+	const res = await apiFetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/agent-v2/settings`);
 	if (!res.ok) {
 		throw new Error(`Failed to load assistant preferences (${res.status})`);
 	}
@@ -165,7 +177,7 @@ export async function saveServerAutoApproveToolNames(
 	names: string[]
 ): Promise<string[]> {
 	const payload = normalizeList(names);
-	const res = await apiFetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/agent/settings`, {
+	const res = await apiFetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/agent-v2/settings`, {
 		method: 'PUT',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ autoApproveToolNames: payload })

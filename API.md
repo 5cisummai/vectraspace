@@ -377,7 +377,7 @@ Rebuilds the **workspace** semantic index (`ws_{workspaceId}_semantic`) by scann
 
 ### Brain — ask (agent + tools)
 
-`POST /api/workspaces/{workspaceId}/brain/ask`
+`POST /api/workspaces/{workspaceId}/agent-v2/runs`
 
 **Auth**: Required; workspace **member** or higher.
 
@@ -613,7 +613,7 @@ Also removes matching `uploadedFile` rows and attempts semantic index cleanup fo
 
 ### Brain — tool confirmation resume
 
-`POST /api/workspaces/{workspaceId}/brain/ask/confirm`
+`POST /api/workspaces/{workspaceId}/agent-v2/approvals/confirm`
 
 **Body**: `{ "pendingId": "<id>", "approved": boolean, "chatId?": "...", "stream?": ..., "background?": ..., "autoApproveToolNames?": [...] }`
 
@@ -625,7 +625,7 @@ Also removes matching `uploadedFile` rows and attempts semantic index cleanup fo
 
 ## Agent tools (server-side)
 
-Tool definitions live under `app/src/lib/server/agent/tools/`. The LLM may call tools such as:
+Tool definitions live under `app/src/lib/server/agent-v2/tools/`. The LLM may call tools such as:
 
 | Tool                     | Purpose                                                             |
 | ------------------------ | ------------------------------------------------------------------- |
@@ -636,7 +636,7 @@ Tool definitions live under `app/src/lib/server/agent/tools/`. The LLM may call 
 | `search_by_metadata`     | Filter vector DB by metadata without a semantic query               |
 | `delete_file`, `move`, … | Mutating tools — may require UI confirmation (`needsApproval`)      |
 
-Clients do not invoke these directly; they are used inside `POST /api/workspaces/{workspaceId}/brain/ask`.
+Clients do not invoke these directly; they are used inside `POST /api/workspaces/{workspaceId}/agent-v2/runs`.
 
 ---
 
@@ -645,7 +645,7 @@ Clients do not invoke these directly; they are used inside `POST /api/workspaces
 1. **Login**: `POST /api/auth/login` → store `accessToken` securely (Keychain).
 2. **Calls**: Send `Authorization: Bearer <accessToken>` on every `/api/*` request except login/signup.
 3. **Refresh**: Either implement cookie jar for `POST /api/auth/refresh`, or re-login when access JWT expires (depends on your JWT expiry settings in `auth`).
-4. **Brain**: Use `POST /api/workspaces/{workspaceId}/brain/ask` (and related workspace routes above) with JSON, NDJSON streaming, or `background: true` as implemented; **no need to reimplement** search/browse/read logic on the client.
+4. **Agent V2**: Use `POST /api/workspaces/{workspaceId}/agent-v2/runs` (and related workspace routes above) with JSON, NDJSON streaming, or `background: true` as implemented; **no need to reimplement** search/browse/read logic on the client.
 5. **Paths**: Always use `rootIndex/...` paths as returned by browse/upload APIs.
 
 ---

@@ -11,7 +11,7 @@ import type {
 	RunRawModelStreamEvent
 } from '@openai/agents';
 import { env } from '$env/dynamic/private';
-import { getMediaAgent } from '$lib/server/agent/agent';
+import { getMediaAgent } from './agent';
 import { createPendingConfirmation } from '$lib/server/pending-tool-confirmation';
 import { saveAssistantMessage } from '$lib/server/chat-store';
 import {
@@ -22,13 +22,13 @@ import {
 	supersedeOtherRunsForChat,
 	emitRunStep
 } from '$lib/server/agent-runs';
-import type { AgentAppContext } from '$lib/server/agent/context';
-import type { AgentRequest } from '$lib/server/agent/types';
-import { MAX_AGENT_ITERATIONS } from '$lib/server/agent/types';
-import { messagesToAgentInputItems } from '$lib/server/agent/memory/history';
-import { normalizeFilters } from '$lib/server/agent/filters';
-import { errorMessage } from '$lib/server/agent/errors';
-import { getAgentModel } from '$lib/server/agent/provider';
+import type { AgentAppContext } from './context';
+import type { AgentRequest } from './types';
+import { MAX_AGENT_ITERATIONS } from './types';
+import { messagesToAgentInputItems } from './memory/history';
+import { normalizeFilters } from './filters';
+import { errorMessage } from './errors';
+import { getAgentModel } from './provider';
 import { newEventId, createRunEventSequencer, persistV2SseEvent } from './run-events';
 
 function sseEvent(event: string, data: unknown): string {

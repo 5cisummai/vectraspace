@@ -1,5 +1,5 @@
 import { error } from '@sveltejs/kit';
-import { runAgent } from '$lib/server/agent';
+import { runAgentV2 } from '$lib/server/agent-v2/entry';
 import { mergeAgentAutoApproveToolNames } from '$lib/server/agent-settings';
 import { askRequestSchema, parseBody } from '$lib/server/api';
 import { db } from '$lib/server/db';
@@ -7,8 +7,7 @@ import { requireAgentRouteWorkspace } from '$lib/server/workspace-auth';
 import type { RequestHandler } from './$types';
 
 /**
- * V2: same contract as `POST /brain/ask` — start an agent run (SSE, v2 envelopes in data).
- * Clients may prefer this path for an explicit v2 feature surface.
+ * Start an agent run (SSE with v2 envelopes).
  */
 export const POST: RequestHandler = async (event) => {
 	const { workspaceId, userId, role } = await requireAgentRouteWorkspace(event, 'MEMBER');
@@ -35,7 +34,9 @@ export const POST: RequestHandler = async (event) => {
 		select: { displayName: true, username: true }
 	});
 
-	return runAgent(body.question ?? '', {
+	return runAgentV2(
+		body.question ?? '',
+		{
 		userId,
 		userDisplayName: profile?.displayName ?? user.username,
 		userUsername: profile?.username ?? user.username,
@@ -46,5 +47,7 @@ export const POST: RequestHandler = async (event) => {
 		regenerate,
 		maxHistoryMessages: maxHistory,
 		autoApproveToolNames
-	}, body.filters);
+		},
+		body.filters
+	);
 };

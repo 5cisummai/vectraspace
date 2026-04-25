@@ -3,8 +3,6 @@
 	import { cn } from '$lib/utils.js';
 
 	interface Props {
-		/** Short eyebrow label rendered above the title in monospaced uppercase */
-		eyebrow?: string;
 		/** Page heading */
 		title?: string;
 		/** Subtitle / description line */
@@ -25,7 +23,6 @@
 	}
 
 	let {
-		eyebrow,
 		title,
 		description,
 		fullscreen = false,
@@ -35,7 +32,7 @@
 		containerClass
 	}: Props = $props();
 
-	const hasHeader = $derived(eyebrow || title || description || headerActions);
+	const hasHeader = $derived(title || description || headerActions);
 
 	// Base padding utilities replicated from .page-content (minus max-w-5xl)
 	const BASE_PADDING = 'mx-auto w-full px-4 py-8 sm:px-6 lg:px-8';
@@ -57,9 +54,6 @@
 			{#if hasHeader}
 				<header class="animate-page-enter flex min-w-0 items-start justify-between gap-4">
 					<div class="flex flex-col gap-1.5">
-						{#if eyebrow}
-							<p class="section-eyebrow">{eyebrow}</p>
-						{/if}
 						{#if title}
 							<h1 class="page-title">{title}</h1>
 						{/if}

@@ -254,20 +254,16 @@
 	});
 </script>
 
-<PageShell
-	eyebrow="Configuration"
-	title="Settings"
-	description="Manage your account settings and preferences."
->
+<PageShell title="Settings" description="Manage your account settings and preferences.">
 	<Tabs.Root bind:value={settingsTab}>
 		<Tabs.List class="grid w-full max-w-2xl grid-cols-2 gap-1 sm:grid-cols-4">
 			<Tabs.Trigger value="storage" class="gap-2">
 				<FolderIcon class="size-4" />
 				Storage
 			</Tabs.Trigger>
-			<Tabs.Trigger value="assistant" class="gap-2">
+			<Tabs.Trigger value="agent" class="gap-2">
 				<SparklesIcon class="size-4" />
-				Assistant
+				Agent
 			</Tabs.Trigger>
 			<Tabs.Trigger value="users" class="gap-2">
 				<UsersIcon class="size-4" />
@@ -387,14 +383,14 @@
 			>
 		</Tabs.Content>
 
-		<Tabs.Content value="assistant" class="space-y-4">
+		<Tabs.Content value="agent" class="space-y-4">
 			<Card.Root class="card-glass"
 				><Card.Content class="p-4">
-					<h3 class="mb-1 text-sm font-medium">AI assistant — file actions</h3>
+					<h3 class="mb-1 text-sm font-medium">AI agent — file actions</h3>
 					<p class="mb-4 text-sm text-muted-foreground">
-						When the chat assistant wants to change files (delete, move, copy, or create folders),
-						it normally asks for confirmation. You can auto-approve specific action types so they
-						run without a prompt. Preferences are synced per workspace on the backend.
+						When the chat agent wants to change files (delete, move, copy, or create folders), it
+						normally asks for confirmation. You can auto-approve specific action types so they run
+						without a prompt. Preferences are synced per workspace on the backend.
 					</p>
 					<ul class="flex flex-col gap-3">
 						{#each AUTO_APPROVE_SETTINGS as opt (opt.id)}
@@ -424,7 +420,7 @@
 														setAutoApproveToolNames(saved);
 													})
 													.catch(() => {
-														toast.error('Could not save assistant preferences');
+														toast.error('Could not save agent preferences');
 													})
 													.finally(() => {
 														assistantSettingsBusy = false;
@@ -613,7 +609,7 @@
 			<Card.Root class="card-glass"
 				><Card.Content class="p-4">
 					<h3 class="mb-2 text-sm font-medium">Version</h3>
-					<p class="text-sm text-muted-foreground">Vectraspace Media Server v0.1.0</p>
+					<p class="text-sm text-muted-foreground">Vectraspace Media Server v0.1.0 Home Edition</p>
 				</Card.Content></Card.Root
 			>
 

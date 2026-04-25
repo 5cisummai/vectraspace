@@ -1,12 +1,8 @@
-// Whitelist: only tools that can require confirmation (mutations).
 const AUTO_APPROVABLE = new Set(['delete_file', 'move', 'copy_file', 'mkdir']);
 
 const MAX_NAMES = 32;
 const MAX_LEN = 64;
 
-/**
- * Normalize client-supplied auto-approve tool names. Unknown names are dropped.
- */
 export function normalizeAutoApproveToolNames(raw: unknown): string[] | undefined {
 	if (raw === undefined || raw === null) return undefined;
 	if (!Array.isArray(raw)) return undefined;
@@ -30,7 +26,6 @@ export function shouldAutoApproveTool(
 ): boolean {
 	if (!autoApproveToolNames?.length) return false;
 	if (autoApproveToolNames.includes(toolName)) return true;
-	// Legacy stored names from before move_file/move_files were unified.
 	if (toolName === 'move') {
 		return (
 			autoApproveToolNames.includes('move_file') && autoApproveToolNames.includes('move_files')

@@ -1,7 +1,3 @@
-// ---------------------------------------------------------------------------
-// agent/tools/filesystem.ts — Read-only filesystem tools (SDK tool() + Zod)
-// ---------------------------------------------------------------------------
-
 import fs from 'node:fs/promises';
 import { tool } from '@openai/agents';
 import type { RunContext } from '@openai/agents';
@@ -16,10 +12,6 @@ import {
 } from '$lib/server/services/storage';
 import type { AgentAppContext } from '../context';
 import { summarizeToolResult } from '../loop-utils';
-
-// ---------------------------------------------------------------------------
-// Helper — wrap read-only tool execution with event emission + summary
-// ---------------------------------------------------------------------------
 
 function makeReadonlyExecute<T extends Record<string, unknown>>(
 	toolName: string,
@@ -40,10 +32,6 @@ function makeReadonlyExecute<T extends Record<string, unknown>>(
 		return output;
 	};
 }
-
-// ---------------------------------------------------------------------------
-// list_directory
-// ---------------------------------------------------------------------------
 
 export const listDirectoryTool = tool({
 	name: 'list_directory',
@@ -80,10 +68,6 @@ export const listDirectoryTool = tool({
 	})
 });
 
-// ---------------------------------------------------------------------------
-// get_file_info
-// ---------------------------------------------------------------------------
-
 export const getFileInfoTool = tool({
 	name: 'get_file_info',
 	description: 'Get metadata for a single file or directory path.',
@@ -118,10 +102,6 @@ export const getFileInfoTool = tool({
 		].join('\n');
 	})
 });
-
-// ---------------------------------------------------------------------------
-// read_file
-// ---------------------------------------------------------------------------
 
 export const readFileTool = tool({
 	name: 'read_file',

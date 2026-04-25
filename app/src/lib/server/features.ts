@@ -10,10 +10,3 @@ import { env } from '$env/dynamic/private';
  * Set via ENABLE_WORKSPACES env var (default: true).
  */
 export const workspacesEnabled: boolean = env.ENABLE_WORKSPACES !== 'false';
-
-/**
- * When true (default), the OpenAI Agents SDK run uses the Agent V2 transport
- * (versioned SSE envelopes, optional run-event replay).
- * Set `USE_AGENT_V2=false` to use the legacy stream (not recommended).
- */
-export const useAgentV2: boolean = env.USE_AGENT_V2 !== 'false';

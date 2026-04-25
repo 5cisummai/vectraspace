@@ -41,7 +41,7 @@ This document defines the current chat/agent API contract so web, mobile, and CL
 
 ### Ask agent (SSE stream)
 
-- `POST /api/workspaces/:workspaceId/brain/ask`
+- `POST /api/workspaces/:workspaceId/agent-v2/runs`
 - Body:
   - `question: string` (required unless `regenerate=true`)
   - `chatId?: string`
@@ -53,7 +53,7 @@ This document defines the current chat/agent API contract so web, mobile, and CL
 
 ### Confirm tool approval (SSE stream)
 
-- `POST /api/workspaces/:workspaceId/brain/ask/confirm`
+- `POST /api/workspaces/:workspaceId/agent-v2/approvals/confirm`
 - Body:
   - `pendingId: string`
   - `approved: boolean`
@@ -69,8 +69,8 @@ This document defines the current chat/agent API contract so web, mobile, and CL
 
 ### Agent preferences
 
-- `GET /api/workspaces/:workspaceId/agent/settings`
-- `PUT /api/workspaces/:workspaceId/agent/settings`
+- `GET /api/workspaces/:workspaceId/agent-v2/settings`
+- `PUT /api/workspaces/:workspaceId/agent-v2/settings`
 - Request body for `PUT`: `{ "autoApproveToolNames"?: string[] }`
 - Response: `{ "autoApproveToolNames": string[] }`
 
@@ -118,6 +118,6 @@ The ask/confirm endpoints stream these events:
   2. If disconnected, query `runs/active`.
   3. If run is done, refresh transcript endpoint.
   4. If awaiting confirmation, call confirm endpoint with `pendingId`.
-- Store `autoApproveToolNames` via `/agent/settings` for cross-device/workspace parity.
+- Store `autoApproveToolNames` via `/agent-v2/settings` for cross-device/workspace parity.
 - Keep rendering and UX state local to each client; treat transcript + SSE events as backend truth.
 - For collaborative UIs, subscribe to workspace events and refresh the active transcript on `chat.message`, `chat.truncated`, `chat.deleted`, and `run.awaiting_confirmation`.

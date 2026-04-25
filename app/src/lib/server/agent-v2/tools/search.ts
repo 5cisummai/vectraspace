@@ -1,7 +1,3 @@
-// ---------------------------------------------------------------------------
-// agent/tools/search.ts — Semantic search tool (SDK tool() + Zod schema)
-// ---------------------------------------------------------------------------
-
 import { tool } from '@openai/agents';
 import type { RunContext } from '@openai/agents';
 import { z } from 'zod';
@@ -57,7 +53,6 @@ export const searchTool = tool({
 
 		const output = formatSearchRows(results);
 
-		// Capture source citations into context
 		for (const r of results) ctx?.sourceTracker.addResult(r);
 
 		const summary = summarizeToolResult(output);

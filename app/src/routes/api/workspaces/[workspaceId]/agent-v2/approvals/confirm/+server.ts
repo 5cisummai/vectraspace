@@ -1,11 +1,11 @@
-import { confirmTool } from '$lib/server/agent';
+import { confirmToolV2 } from '$lib/server/agent-v2/entry';
 import { mergeAgentAutoApproveToolNames } from '$lib/server/agent-settings';
 import { confirmToolSchema, parseBody } from '$lib/server/api';
 import { requireAgentRouteWorkspace } from '$lib/server/workspace-auth';
 import type { RequestHandler } from './$types';
 
 /**
- * V2: same as `POST /brain/ask/confirm` (SSE resume with v2 envelopes when USE_AGENT_V2 is on).
+ * Continue a pending run after a tool confirmation decision.
  */
 export const POST: RequestHandler = async (event) => {
 	const { workspaceId, userId, role } = await requireAgentRouteWorkspace(event, 'MEMBER');
@@ -19,7 +19,7 @@ export const POST: RequestHandler = async (event) => {
 		body.autoApproveToolNames
 	);
 
-	return confirmTool({
+	return confirmToolV2({
 		userId,
 		isAdmin: user.role === 'ADMIN',
 		workspaceRole: role,

@@ -1,5 +1,5 @@
 import { mergeAgentAutoApproveToolNames } from '$lib/server/agent-settings';
-import { shouldAutoApproveTool } from '$lib/server/agent/auto-approve-tools';
+import { shouldAutoApproveTool } from './auto-approve-tools';
 
 /**
  * Auto-approve tool names the server will honor for this run.

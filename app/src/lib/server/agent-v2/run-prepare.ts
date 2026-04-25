@@ -1,7 +1,3 @@
-// ---------------------------------------------------------------------------
-// run-prepare.ts — Shared prep for new question / regeneration (v1 and v2 agent)
-// ---------------------------------------------------------------------------
-
 import { error } from '@sveltejs/kit';
 import type { AgentRequest, AgentRunConfig, AskFilters } from './types';
 import { sliceHistory } from './memory/history';
@@ -30,10 +26,6 @@ async function assertNoConcurrentRun(targetChatId: string): Promise<void> {
 	);
 }
 
-/**
- * Resolves chat, enforces collaboration rules, builds agent request body.
- * Call from runAgent (v1) or runAgentV2.
- */
 export async function prepareAgentRun(
 	question: string,
 	config: AgentRunConfig,

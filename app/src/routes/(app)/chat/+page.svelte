@@ -331,7 +331,7 @@
 	</Sidebar.Content>
 {/snippet}
 
-<div class="flex h-full min-h-0 w-full flex-col bg-background">
+<div class="chat-shell flex h-full min-h-0 w-full flex-col bg-background">
 	<div class="flex h-full min-h-0 w-full flex-1">
 		{#if isNarrowViewport.current}
 			{#if agentSidebarOpen}
@@ -440,3 +440,11 @@
 		</div>
 	{/if}
 </div>
+
+<style>
+	.chat-shell {
+		background:
+			radial-gradient(900px 420px at 0% -15%, color-mix(in oklab, var(--primary) 6%, transparent), transparent 65%),
+			radial-gradient(850px 380px at 100% 100%, color-mix(in oklab, var(--muted) 35%, transparent), transparent 72%);
+	}
+</style>

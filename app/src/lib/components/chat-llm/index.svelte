@@ -23,6 +23,8 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { Textarea } from '$lib/components/ui/textarea';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+	import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
 	import ChatMessageBubble from './chat-message-bubble.svelte';
 	import ChatComposer from './chat-composer.svelte';
 	import { SLASH_COMMANDS } from './slash-commands';
@@ -389,7 +391,7 @@
 			if (!apiRoot) {
 				throw new Error('No workspace selected');
 			}
-			const response = await apiFetch(`${apiRoot}/brain/ask`, {
+			const response = await apiFetch(`${apiRoot}/agent-v2/runs`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -506,7 +508,7 @@
 			if (!apiRoot) {
 				throw new Error('No workspace selected');
 			}
-			const response = await apiFetch(`${apiRoot}/brain/ask/confirm`, {
+			const response = await apiFetch(`${apiRoot}/agent-v2/approvals/confirm`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -1052,7 +1054,10 @@
 								title="Click to see call details"
 							>
 								{#if step.done}
-									<span class="text-emerald-600 dark:text-emerald-400" aria-hidden="true">✓</span>
+									<CircleCheckIcon
+										class="size-3.5 text-emerald-600 dark:text-emerald-400"
+										aria-hidden="true"
+									/>
 								{:else}
 									<span
 										class="inline-block size-1.5 shrink-0 animate-pulse rounded-full bg-muted-foreground/70"
@@ -1060,10 +1065,12 @@
 									></span>
 								{/if}
 								<span>{step.label}…</span>
-								<span
-									class="text-[10px] text-muted-foreground/40 group-hover:text-muted-foreground/70"
-									>{step.expanded ? '▲' : '▼'}</span
-								>
+								<ChevronDownIcon
+									class="size-3 text-muted-foreground/40 transition-transform group-hover:text-muted-foreground/70 {step.expanded
+										? 'rotate-180'
+										: ''}"
+									aria-hidden="true"
+								/>
 							</button>
 							{#if step.expanded}
 								<div
